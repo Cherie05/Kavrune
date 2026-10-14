@@ -1,0 +1,40 @@
+/* SPDX-License-Identifier: MIT */
+@define-color accent_color mix(@window_fg_color, #6955d7, 0.55);
+@define-color accent_bg_color #6955d7;
+@define-color accent_fg_color white;
+
+window.kavrune { background-color: @window_bg_color; }
+.app-sidebar { background-color: alpha(@view_bg_color, 0.65); border-right: 1px solid alpha(@window_fg_color, 0.08); }
+.brand { padding: 25px 20px 23px; }
+.brand-name { font-size: 20px; font-weight: 800; letter-spacing: -0.4px; }
+.brand-subtitle { font-size: 11px; opacity: 0.62; }
+.sidebar-list { background: transparent; padding: 0 12px; }
+.sidebar-list row { border-radius: 10px; margin-bottom: 5px; padding: 2px; }
+.sidebar-list row:selected { background-color: alpha(@accent_bg_color, 0.13); color: @accent_color; }
+.nav-item { padding: 12px 11px; }
+.nav-label { font-weight: 600; font-size: 13px; }
+.sidebar-footer { font-size: 11px; opacity: 0.65; padding: 20px; }
+.page-content { padding: 30px 34px 30px; }
+.eyebrow { color: @accent_color; font-size: 10px; font-weight: 800; letter-spacing: 1.4px; }
+.hero-title { font-size: 29px; font-weight: 800; letter-spacing: -0.7px; }
+.hero-subtitle { font-size: 13px; opacity: 0.68; }
+.step-card { background: @view_bg_color; border-radius: 15px; border: 1px solid alpha(@window_fg_color, 0.09); padding: 19px 21px; }
+.step-number { background: alpha(@accent_bg_color, 0.12); color: @accent_color; border-radius: 9px; padding: 8px 9px; font-size: 12px; font-weight: 800; }
+.card-title { font-size: 14px; font-weight: 700; }
+.card-caption { font-size: 12px; opacity: 0.65; }
+.file-name { font-size: 15px; font-weight: 650; }
+.source-icon { color: @accent_color; background: alpha(@accent_bg_color, 0.08); border-radius: 12px; padding: 16px; }
+.safety-note { background: alpha(#238981, 0.09); border: 1px solid alpha(#238981, 0.2); border-radius: 12px; padding: 14px 17px; }
+.safety-icon { color: #238981; }
+.warning-note { background: alpha(@warning_color, 0.1); border-radius: 10px; padding: 13px; }
+.action-button { padding: 11px 23px; font-weight: 700; border-radius: 10px; }
+.secondary-button { padding: 8px 14px; border-radius: 9px; }
+.device-dropdown { padding: 4px 0; }
+.progress-card { margin: 0 34px 24px; padding: 18px 21px; border-radius: 13px; background: @view_bg_color; border: 1px solid alpha(@accent_bg_color, 0.2); }
+.progress-title { font-size: 13px; font-weight: 700; }
+.status-text { font-size: 11px; opacity: 0.68; }
+.checksum { font-family: monospace; font-size: 11px; }
+.activity-text { font-family: monospace; font-size: 12px; padding: 14px; }
+.empty-icon { opacity: 0.4; }
+.preview-badge { background: alpha(@accent_bg_color, 0.12); color: @accent_color; border-radius: 6px; padding: 4px 8px; font-size: 10px; font-weight: 700; }
+/* Adwaita supplies focus, high contrast, scalable text and dark variants. */

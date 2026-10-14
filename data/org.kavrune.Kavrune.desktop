@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Kavrune
+GenericName=USB Image Writer
+Comment=Create and verify installation media on Linux
+Exec=kavrune
+Icon=org.kavrune.Kavrune
+Terminal=false
+Categories=System;GTK;
+Keywords=USB;ISO;image;boot;flash;
+StartupNotify=true

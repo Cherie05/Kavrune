@@ -1,0 +1,73 @@
+name: Bug report
+description: Report a reproducible problem in Kavrune.
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the failure and how to reproduce it. Read SECURITY.md before
+        reporting a vulnerability; use the repository's private reporting route
+        when available. Do not include private paths, drive serial numbers,
+        personal files, passwords, or tokens in a public issue.
+        Reproduce storage problems with temporary regular files where possible.
+  - type: input
+    id: version
+    attributes:
+      label: Kavrune version or commit
+      placeholder: "0.1.0 or the commit hash"
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Linux environment
+      description: Include distribution/version, CPU architecture, desktop, and installation method.
+      placeholder: "Ubuntu 24.04, x86_64, GNOME, built from source"
+    validations:
+      required: true
+  - type: dropdown
+    id: interface
+    attributes:
+      label: Affected interface
+      options:
+        - Desktop application
+        - Command line
+        - Build or packaging
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Include the operation and image format. Do not repeat a destructive operation just to obtain a report.
+      placeholder: |
+        1. Launch Kavrune...
+        2. Select...
+        3. Observe...
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected and actual behavior
+      description: Include any error message and whether an operation was cancelled.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs or screenshots
+      description: Remove identifying information, secrets, drive serial numbers, and personal paths before sharing.
+      render: text
+    validations:
+      required: false
+  - type: checkboxes
+    id: report_checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I have searched existing issues for this problem.
+          required: true
+        - label: This report contains no confidential data or undisclosed vulnerability details.
+          required: true

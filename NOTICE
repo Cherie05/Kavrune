@@ -1,0 +1,11 @@
+Kavrune
+Copyright (c) 2026 Kavrune contributors
+
+The project's original source, documentation, stylesheet, and SVG icon are
+licensed under the MIT License in LICENSE. Contributions retain their authors'
+copyrights and must be submitted with compatible licensing and provenance.
+
+Third-party shared libraries and system services keep their respective licenses.
+See THIRD_PARTY_LICENSES.md for dependency notices and upstream references.
+Those components are not relicensed by this notice. No operating-system image
+or proprietary bootloader is bundled with Kavrune.

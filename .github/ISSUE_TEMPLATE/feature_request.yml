@@ -1,0 +1,44 @@
+name: Feature request
+description: Propose an improvement to Kavrune.
+title: "[Feature] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Explain the user need and expected behavior. Read ROADMAP.md in docs/
+        and search existing issues first. For a storage feature, explain how
+        users would select the correct target and recover from a failure.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem should this solve?
+      description: Describe who needs the feature and the task they are trying to complete.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the workflow and the result a user should see.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: false
+  - type: textarea
+    id: storage_safety
+    attributes:
+      label: Storage safety and validation
+      description: For features involving devices, explain data-loss risks and how the behavior could be tested safely with files. Otherwise write "Not applicable".
+    validations:
+      required: true
+  - type: checkboxes
+    id: request_checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I have searched existing issues and reviewed the roadmap.
+          required: true
