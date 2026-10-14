@@ -1,6 +1,6 @@
 # Release roadmap
 
-The supplied product plan is the requirements input. This independently implemented 0.1 milestone delivers the raw Linux media workflow, format, backup, checksums and a read scan. It does not claim the complete 1.0 feature set.
+The independently implemented 0.1 milestone delivers the raw Linux media workflow, format, backup, checksums and a read scan. The following milestones describe the remaining work toward 1.0.
 
 | Milestone | Work required |
 |---|---|
