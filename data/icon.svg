@@ -1,0 +1,8 @@
+<!-- Original Kavrune artwork. SPDX-License-Identifier: MIT -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs><linearGradient id="a" x2="1" y2="1"><stop stop-color="#7461df"/><stop offset="1" stop-color="#4c40a3"/></linearGradient></defs>
+  <rect x="8" y="8" width="112" height="112" rx="30" fill="url(#a)"/>
+  <path d="M49 28h30v20H49z" fill="#cfc8ff"/><path d="M45 47h38v47a9 9 0 0 1-9 9H54a9 9 0 0 1-9-9z" fill="#fff"/>
+  <path d="m65 56-12 21h10l-3 16 15-24H64z" fill="#6351c9"/><path d="M57 33v8m14-8v8" stroke="#6351c9" stroke-width="4"/>
+  <circle cx="95" cy="32" r="4" fill="#b6f2dc"/><path d="M28 63v12m-6-6h12" stroke="#b6f2dc" stroke-width="3" stroke-linecap="round"/>
+</svg>
