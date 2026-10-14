@@ -106,6 +106,8 @@ Image identity_for(const std::string& path, const struct stat& st) {
     image.device = static_cast<uint64_t>(st.st_dev);
     image.mtime_sec = st.st_mtim.tv_sec;
     image.mtime_nsec = st.st_mtim.tv_nsec;
+    image.ctime_sec = st.st_ctim.tv_sec;
+    image.ctime_nsec = st.st_ctim.tv_nsec;
     return image;
 }
 
@@ -115,7 +117,8 @@ void validate_source(const Image& image, int fd) {
             static_cast<uint64_t>(st.st_size) == image.size &&
             static_cast<uint64_t>(st.st_ino) == image.inode &&
             static_cast<uint64_t>(st.st_dev) == image.device &&
-            st.st_mtim.tv_sec == image.mtime_sec && st.st_mtim.tv_nsec == image.mtime_nsec;
+            st.st_mtim.tv_sec == image.mtime_sec && st.st_mtim.tv_nsec == image.mtime_nsec &&
+            st.st_ctim.tv_sec == image.ctime_sec && st.st_ctim.tv_nsec == image.ctime_nsec;
     };
     struct stat path_stat {};
     if (!valid(file_stat(fd)) || ::lstat(image.path.c_str(), &path_stat) != 0 || !valid(path_stat))
@@ -181,7 +184,7 @@ public:
         if (stage != stage_) { stage_ = stage; start_ = std::chrono::steady_clock::now(); }
         if (!callback_) return;
         const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start_).count();
-        const bool streaming = stage == "Writing" || stage == "Verifying" || stage == "Checksum" || stage == "Backing up" || stage == "Scanning";
+        const bool streaming = stage == "Writing" || stage == "Verifying" || stage == "Checksum" || stage == "Backing up" || stage == "Scanning" || stage == "Checking source";
         callback_({stage, done, total, streaming && seconds > 0 ? static_cast<double>(done) / seconds : 0, detail});
     }
 };
@@ -530,12 +533,31 @@ std::string write_image(const Image& image, int target_fd, uint64_t capacity, bo
         throw Error("The image and target refer to the same file.");
     const int flags = ::fcntl(target_fd, F_GETFL);
     if (verify && (flags & O_ACCMODE) == O_WRONLY) throw Error("Verification requires a target descriptor that permits reading.");
+    std::string required_hash = image.expected_sha256;
+    for (auto& character : required_hash) if (character >= 'A' && character <= 'F') character = static_cast<char>(character - 'A' + 'a');
+    if (!required_hash.empty() && (required_hash.size() != 64 || required_hash.find_first_not_of("0123456789abcdef") != std::string::npos))
+        throw Error("The selected image fingerprint is invalid. Choose the image again.");
     Reporter reporter(progress);
     Digest written("SHA-256");
     std::vector<unsigned char> buffer(chunk_size);
     bool touched = false, synchronized = false;
     uint64_t accepted = 0;
     try {
+        if (!required_hash.empty()) {
+            Digest checked("SHA-256");
+            reporter.emit("Checking source", 0, image.size, "Checking that the image still matches the file selected before confirmation.");
+            for (uint64_t offset = 0; offset < image.size;) {
+                cancelled(cancel);
+                const size_t count = static_cast<size_t>(std::min<uint64_t>(buffer.size(), image.size - offset));
+                read_exact(source.get(), buffer.data(), count, offset);
+                checked.update(buffer.data(), count);
+                offset += count;
+                reporter.emit("Checking source", offset, image.size);
+            }
+            validate_source(image, source.get());
+            if (checked.finish() != required_hash)
+                throw Error("The image no longer matches the selected checksum. No image bytes were written; choose the image again.");
+        }
         reporter.emit("Writing", 0, image.size);
         // Progress callbacks can run application code, so revalidate immediately before writing.
         cancelled(cancel);
@@ -558,6 +580,8 @@ std::string write_image(const Image& image, int target_fd, uint64_t capacity, bo
         synchronized = true;
         cancelled(cancel);
         const std::string expected = written.finish();
+        if (!required_hash.empty() && expected != required_hash)
+            throw Error("The image changed while writing. The USB does not match the selected checksum; recreate it before use.");
         if (verify) {
             Digest readback("SHA-256");
             DirectReadback direct(target_fd, S_ISBLK(target_stat.st_mode), image.size, capacity);
@@ -585,6 +609,84 @@ std::string write_image(const Image& image, int target_fd, uint64_t capacity, bo
             sync_fd(target_fd);
         }
         throw;
+    }
+}
+
+SelfTestResult run_self_test(const ProgressFn& progress, const std::atomic_bool& cancel) {
+    try {
+        cancelled(cancel);
+        struct Scratch {
+            std::string path;
+            Fd directory;
+            Scratch() {
+                std::error_code error;
+                const auto base = std::filesystem::temp_directory_path(error);
+                if (error) throw Error("The temporary folder is unavailable: " + error.message());
+                const std::string name = (base / "kavrune-self-test-XXXXXX").string();
+                std::vector<char> pattern(name.begin(), name.end());
+                pattern.push_back('\0');
+                const char* created = ::mkdtemp(pattern.data());
+                if (!created) system_error("Could not create a private temporary test folder");
+                path = created;
+                directory = Fd(::open(path.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW));
+                if (directory.get() < 0) {
+                    const int saved = errno;
+                    ::rmdir(path.c_str());
+                    errno = saved;
+                    system_error("Could not open the temporary test folder");
+                }
+            }
+            ~Scratch() {
+                // Only remove the two entries created inside our private directory.
+                // Never recursively remove caller-provided paths or follow links.
+                ::unlinkat(directory.get(), "source.img", 0);
+                ::unlinkat(directory.get(), "written.img", 0);
+                ::rmdir(path.c_str());
+            }
+        } scratch;
+        constexpr uint64_t bytes = 8ULL * 1024 * 1024 + 37;
+        const std::string source_path = scratch.path + "/source.img";
+        const std::string target_path = scratch.path + "/written.img";
+        Fd source(::openat(scratch.directory.get(), "source.img", O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600));
+        if (source.get() < 0) system_error("Could not create the temporary test image");
+        Fd target(::openat(scratch.directory.get(), "written.img", O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600));
+        if (target.get() < 0) system_error("Could not create the temporary test destination");
+        if (!S_ISREG(file_stat(source.get()).st_mode) || !S_ISREG(file_stat(target.get()).st_mode))
+            throw Error("The safe test requires ordinary temporary files.");
+        if (::ftruncate(target.get(), static_cast<off_t>(bytes)) != 0)
+            system_error("Could not reserve space for the temporary test");
+        Reporter reporter(progress);
+        reporter.emit("Preparing test", 0, bytes, "Creating sample data in a private temporary folder. No USB drive is changed.");
+        std::vector<unsigned char> buffer(chunk_size);
+        for (uint64_t offset = 0; offset < bytes;) {
+            cancelled(cancel);
+            const size_t count = static_cast<size_t>(std::min<uint64_t>(buffer.size(), bytes - offset));
+            for (size_t index = 0; index < count; ++index) {
+                const uint64_t position = offset + index;
+                buffer[index] = static_cast<unsigned char>((position * 37U + (position >> 12U) + (position >> 20U)) & 0xffU);
+            }
+            // A deliberately unstructured .img is a raw-copy fixture, not a bootable OS.
+            if (offset == 0) std::fill(buffer.begin(), buffer.begin() + 1024, 0);
+            write_exact(source.get(), buffer.data(), count, offset);
+            offset += count;
+            reporter.emit("Preparing test", offset, bytes);
+        }
+        sync_fd(source.get());
+        Image image = inspect_image(source_path);
+        const std::string expected = checksum(source_path, "SHA256", {}, cancel);
+        image.expected_sha256 = expected;
+        const ProgressFn writing = [&](const Progress& status) {
+            if (progress && status.stage != "Complete") progress(status);
+        };
+        const std::string written = write_image(image, target.get(), bytes, true, writing, cancel);
+        const std::string actual = checksum(target_path, "SHA256", {}, cancel);
+        if (written != expected || actual != expected)
+            throw Error("The safe test failed: the copied sample does not match the original.");
+        cancelled(cancel);
+        reporter.emit("Complete", bytes, bytes, "Safe test passed. Writing and verification work with temporary files; no USB drive was changed.");
+        return {bytes, actual};
+    } catch (const Cancelled&) {
+        throw Cancelled("Safe test cancelled. Temporary test files were removed; no USB drive was changed.");
     }
 }
 

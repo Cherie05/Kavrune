@@ -10,7 +10,7 @@ An independently implemented Linux desktop application for creating and verifyin
 
 ## Start the application
 
-From this checkout:
+If the desktop package is installed, open **Kavrune** from your application menu. From this source checkout:
 
 ```sh
 ./scripts/run.sh
@@ -18,25 +18,30 @@ From this checkout:
 
 The compiled desktop application is `build/kavrune`; the CLI is `build/kavrune-cli`. Run as your normal desktop user. UDisks2 and your desktop's Polkit authentication agent authorize individual storage operations.
 
-Choose an ISO/IMG/RAW image, connect an external USB drive, review its identity, and click Create. The confirmation displays the exact model, device path, capacity, and serial. Writing permanently replaces the selected drive's data and partition layout. Kavrune streams the original image, synchronizes writes, verifies SHA-256 readback, and requests a device rescan before reporting success. Firmware compatibility depends on the image supplied.
+First click **Try a safe test** on **Create USB**. It uses temporary files to exercise the image writer and readback check; no ISO or USB is required and no physical drive is opened.
+
+For your first physical trial, use a spare USB with no important files. Download a Linux installer ISO from its publisher, choose it in **Create USB**, select the USB by its name and size, and review the erasure confirmation. Kavrune writes the image, saves buffered data, verifies the written portion using SHA-256, and requests a device rescan before reporting success. Leave the USB connected until the final result. A verified write is separate from a boot test on the intended computer.
+
+Read the [beginner guide](docs/GETTING_STARTED.md) for each step and [feature status](docs/FEATURE_STATUS.md) for what is working and what remains to qualify.
 
 ## Available features
 
 | Operation | Behavior |
 |---|---|
-| Create media / restore | Raw writes of hybrid ISOs and raw disk images; original partitions and boot files preserved |
+| Create USB | Write a supported Linux installer or restore a raw drive backup; preserve the image's partition and boot layout |
 | Device discovery | UDisks2 discovery, hotplug refresh, whole-drive filtering and hardware identity checks |
 | Drive protection | System/storage ancestry, configured drives, active swap, holders, read-only and internal disks excluded |
 | Verification | Mandatory SHA-256 comparison after writing; errors and incomplete operations reported |
-| Format drive | GPT/MBR and FAT32, exFAT, ext4 using system UDisks2 tools |
-| Back up drive | Full raw backup into a new file; exclusive creation and SHA-256 calculation |
-| Check image | SHA-256, SHA-512, SHA-1 and MD5; optional expected checksum comparison |
-| Scan drive | Read-only scan of reported capacity; reports read errors |
+| Format USB | Prepare empty file storage using GPT/MBR and FAT32, exFAT or ext4 |
+| Back up USB | Save the entire drive to a new IMG file; refuse overwrites and report SHA-256 |
+| Check download | Calculate SHA-256 or SHA-512 and optionally compare the publisher's checksum; CLI also supports legacy SHA-1/MD5 |
+| Check USB | Read the reported capacity and report read errors without writing data |
 | Activity | Private per-user technical event log |
+| How to use | In-app steps, explanations and current feature limits |
 | CLI | Same image engine and storage validation as desktop; JSON device/image output |
 | Packaging | Desktop entry, original SVG icon, AppStream metadata, `.deb` and SPDX inventory |
 
-Windows installer extraction/WIM splitting, NTFS formatting, compressed-image streaming, distribution-specific persistence, destructive fake-capacity testing, and automatic Linux/Windows installer boot qualification on BIOS/UEFI are **not implemented**. Optical-only and Windows installation images are blocked from raw USB creation. A read-only scan cannot establish actual flash capacity. See [release roadmap](docs/ROADMAP.md).
+Windows installer extraction/WIM splitting, NTFS formatting, compressed-image streaming, distribution-specific persistence, destructive fake-capacity testing, and automatic Linux/Windows installer boot qualification on BIOS/UEFI are **not implemented**. Optical-only and Windows installation images are blocked from raw USB creation. A read-only scan cannot establish actual flash capacity. See [feature status](docs/FEATURE_STATUS.md) and the [release roadmap](docs/ROADMAP.md).
 
 Only external drives with verifiable identities are eligible. Some adapters expose insufficient serial information and will be refused. Filesystems whose physical ancestry cannot be established are refused where necessary for safety. There is no internal-disk override.
 
@@ -69,6 +74,16 @@ Packages and the dependency inventory appear under `dist/`. Installing the packa
 
 ## Safe test without a USB drive
 
+After building, run:
+
+```sh
+./build/kavrune-cli self-test
+```
+
+The self-test generates a small sample image, writes a temporary regular-file copy through the shared engine, and verifies the result. It needs no downloaded installer, USB, storage-service access or password prompt. A passed test checks file-based writing; it does not qualify physical drives or firmware. Add `--json` for a machine-readable result, including `physical_usb_tested: false`.
+
+To test an image you supply, create a new file destination:
+
 ```sh
 ./build/kavrune-cli inspect path/to/image.img
 ./build/kavrune-cli simulate path/to/image.img /tmp/new-test-drive.img
@@ -85,7 +100,7 @@ ctest --test-dir build --output-on-failure
 ./scripts/test-boot.sh ./build/kavrune-cli
 ```
 
-Regression tests use synthetic data in temporary files, not physical drives. `--smoke-test` briefly opens the desktop UI and exits without changing storage. The regression suite covers corruption, cancellation, image mutation, identity changes, image metadata bounds, overwrites and symlinks. The optional boot script uses system QEMU/SeaBIOS to boot an original synthetic MBR image after writing/verifying it; it skips when QEMU is unavailable. Real Linux/Windows installer booting, USB writing, format tooling, unplug behavior, and Polkit prompts require the disposable-hardware/VM release matrix in [VALIDATION.md](docs/VALIDATION.md).
+Regression tests use synthetic data in temporary files, not physical drives. `--smoke-test` briefly opens the desktop UI and exits without changing storage. The regression suite covers corruption, cancellation, image mutation, identity changes, image metadata bounds, overwrites and symlinks. The optional boot script uses system QEMU/SeaBIOS to boot an original synthetic MBR image after writing/verifying it; it skips when QEMU is unavailable. Read the [recorded local results](docs/BUILD_RESULTS.md) for completed checks. Real Linux/Windows installer booting, USB writing, format tooling, unplug behavior, and Polkit prompts require the disposable-hardware/VM release matrix in [VALIDATION.md](docs/VALIDATION.md).
 
 ## CLI
 
@@ -108,4 +123,4 @@ Original project code, documentation and artwork are available under the [MIT Li
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting a change and follow the [Code of Conduct](CODE_OF_CONDUCT.md). Public issues are suitable for ordinary bugs and feature requests. Use the private reporting process in [SECURITY.md](SECURITY.md) for vulnerabilities, and review the [storage disclaimer](DISCLAIMER.md) before writing a drive.
 
-See the [changelog](CHANGELOG.md) for preview scope and the [GitHub publishing guide](docs/PUBLISHING.md) to publish this checkout to a repository you own. No hosted repository or security contact is assumed by this checkout.
+See the [changelog](CHANGELOG.md) for preview scope and the [GitHub publishing guide](docs/PUBLISHING.md) for repository setup and release steps. Follow [SECURITY.md](SECURITY.md) for the available vulnerability reporting process.

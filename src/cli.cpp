@@ -93,6 +93,7 @@ void help() {
       "  kavrune-cli devices [--all] [--json]\n"
       "  kavrune-cli inspect IMAGE [--json]\n"
       "  kavrune-cli checksum IMAGE [--algorithm SHA256] [--expected HEX]\n"
+      "  kavrune-cli self-test [--json]\n"
       "  kavrune-cli simulate IMAGE NEW_FILE\n"
       "  kavrune-cli write IMAGE --device ID --confirm /dev/DEVICE\n"
       "  kavrune-cli format --device ID --confirm /dev/DEVICE [--scheme gpt|mbr]\n"
@@ -102,6 +103,7 @@ void help() {
       "write and format ERASE the selected USB drive. A Polkit agent is required.\n"
       "All write operations include SHA-256 readback verification.\n"
       "simulate uses a newly created regular file and never opens a block device.\n"
+      "self-test checks writing and verification with disposable files; no ISO or USB needed.\n"
       "backup refuses to overwrite files; backup and scan unmount the selected drive.\n"
       "Use Ctrl+C to cancel streaming operations; synchronization finishes safely.\n";
 }
@@ -113,6 +115,19 @@ int main(int argc, char** argv) {
         if (argc < 2 || std::string(argv[1]) == "--help" || std::string(argv[1]) == "help") { help(); return 0; }
         if (::geteuid() == 0) throw af::Error("Run Kavrune as a normal user. UDisks2 and Polkit authorize individual storage operations.");
         std::string command = argv[1];
+        if (command == "self-test") {
+            const auto opts = options(argc, argv, 2, {"--json"});
+            const auto result = af::run_self_test(report, cancelled);
+            std::cerr << '\n';
+            if (opts.count("--json"))
+                std::cout << "{\"passed\":true,\"bytes\":" << result.bytes << ",\"sha256\":" << json(result.sha256)
+                          << ",\"physical_usb_tested\":false}\n";
+            else std::cout << "Safe test passed. Writing and SHA-256 verification succeeded.\n"
+                           << "No USB drives were accessed or changed.\n"
+                           << "Tested " << af::human_size(result.bytes) << ". SHA-256: " << result.sha256 << '\n'
+                           << "Real USB devices and boot compatibility still need separate testing.\n";
+            return 0;
+        }
         if (command == "inspect") {
             if (argc < 3) throw af::Error("Specify an image file.");
             auto opts = options(argc, argv, 3, {"--json"});

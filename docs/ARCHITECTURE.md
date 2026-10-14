@@ -12,11 +12,11 @@ flowchart TD
   Core --> Kernel[Linux storage I/O]
 ```
 
-`include/kavrune/core.hpp` defines the shared domain objects and cancellable streaming operations. `src/core.cpp` performs image inspection, digests, writing, verification, backups, read scans and private logging. Its tests do not require GTK or privileged storage.
+`include/kavrune/core.hpp` defines the shared domain objects and cancellable streaming operations. `src/core.cpp` performs image inspection, digests, writing, verification, backups, read scans and private logging. The shared safe self-test creates private temporary regular files, exercises the writer and readback check, and removes its files on success, failure or cancellation. Its tests do not require GTK or privileged storage.
 
 `include/kavrune/storage.hpp` and `src/storage.cpp` wrap only the required UDisks interfaces. The original daemon proposed in the PRD is unnecessary for this first milestone: UDisks already supplies the privileged service, Polkit authorization and descriptor transfer. A custom root daemon would create an additional security surface without enabling a necessary feature here.
 
-`src/desktop.cpp` creates the native UI and dispatches blocking work to workers. GTK updates return to the main context; operations prevent concurrent storage actions. Hotplug enumeration runs independently while idle. The selected device/image are copied into an operation before confirmation/execution.
+`src/desktop.cpp` creates the native UI and dispatches blocking work to workers. GTK updates are queued as idle sources on the main context; operations prevent concurrent storage actions. Hotplug enumeration runs independently while idle. The selected device/image are copied into an operation before confirmation/execution. The desktop binds the selected image to its device, inode, size, modification/change times and SHA-256; the writer checks the pinned source descriptor and digest before its first target write and requires the written digest to match. A failed publisher-checksum comparison blocks creation.
 
 `src/cli.cpp` shares the same engine and safety layer. The simulation command creates a new regular file and never requests block access. `CMakeLists.txt` builds both entry points, embeds original UI assets, runs CTest and creates Debian packages.
 

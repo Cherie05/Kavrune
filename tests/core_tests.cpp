@@ -10,6 +10,7 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <sys/stat.h>
@@ -56,8 +57,14 @@ void put(const std::filesystem::path& path, const std::vector<unsigned char>& da
     if (!output) throw std::runtime_error("fixture write failed");
 }
 std::vector<unsigned char> get(const std::filesystem::path& path) {
-    std::ifstream input(path, std::ios::binary);
-    return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+    std::ifstream input(path, std::ios::binary | std::ios::ate);
+    const auto size = input.tellg();
+    if (size < 0) throw std::runtime_error("fixture read size failed");
+    std::vector<unsigned char> data(static_cast<size_t>(size));
+    input.seekg(0);
+    input.read(reinterpret_cast<char*>(data.data()), static_cast<std::streamsize>(data.size()));
+    if (!input) throw std::runtime_error("fixture read failed");
+    return data;
 }
 std::vector<unsigned char> pattern(size_t size) {
     std::vector<unsigned char> data(size);
@@ -287,6 +294,36 @@ void writing_tests(const Temp& temp) {
     check(callback_error, "callback failure unwinds safely");
     // A caller-provided bad descriptor is never used as a shell or arbitrary device path.
     fails([&] { write_image(source, -1, target_data.size(), true, {}, cancel); }, "invalid descriptor rejected");
+    put(source_path, source_data); source = inspect_image(source_path);
+    put(target_path, target_data);
+    struct stat original {};
+    check(::stat(source_path.c_str(), &original) == 0, "capture source timestamps");
+    {
+        Descriptor editable(source_path);
+        const unsigned char changed = source_data[20] ^ 0xff;
+        check(::pwrite(editable.fd, &changed, 1, 20) == 1, "same-size source mutation");
+        const timespec times[] = {original.st_atim, original.st_mtim};
+        check(::futimens(editable.fd, times) == 0, "restore source modification time");
+    }
+    fails([&] { write_image(source, target.fd, target_data.size(), true, {}, cancel); }, "ctime detects same-size mutation with restored mtime");
+    check(get(target_path) == target_data, "restored-mtime mutation leaves target unchanged");
+    put(source_path, source_data); source = inspect_image(source_path);
+    source.expected_sha256 = std::string(64, '0');
+    fails([&] { write_image(source, target.fd, target_data.size(), true, {}, cancel); }, "selected source fingerprint mismatch fails");
+    check(get(target_path) == target_data, "fingerprint mismatch occurs before target writes");
+    source.expected_sha256 = "invalid";
+    fails([&] { write_image(source, target.fd, target_data.size(), true, {}, cancel); }, "malformed source fingerprint fails");
+    check(get(target_path) == target_data, "malformed fingerprint leaves target unchanged");
+    source.expected_sha256 = checksum(source_path, "SHA-256", {}, cancel);
+    std::transform(source.expected_sha256.begin(), source.expected_sha256.end(), source.expected_sha256.begin(), [](unsigned char c) { return c >= 'a' && c <= 'f' ? static_cast<char>(c - 'a' + 'A') : static_cast<char>(c); });
+    stages.clear();
+    const auto bound_hash = write_image(source, target.fd, target_data.size(), true, [&](const Progress& p) { stages.push_back(p.stage); }, cancel);
+    check(bound_hash == hash && std::equal(source_data.begin(), source_data.end(), get(target_path).begin()), "valid uppercase fingerprint writes the selected image");
+    check(!stages.empty() && stages.front() == "Checking source" && stages.back() == "Complete", "bound source is checked before writing");
+    put(target_path, target_data);
+    cancel = false;
+    fails([&] { write_image(source, target.fd, target_data.size(), true, [&](const Progress& p) { if (p.stage == "Checking source" && p.done) cancel = true; }, cancel); }, "source fingerprint check can be cancelled");
+    check(get(target_path) == target_data, "cancel during source check leaves target unchanged");
 }
 
 void backup_and_scan_tests(const Temp& temp) {
@@ -353,6 +390,42 @@ void log_and_utility_tests(const Temp& temp) {
     fails([&] { log_event("symlink log"); }, "log symlink rejected");
     if (prior) ::setenv("XDG_STATE_HOME", prior_value.c_str(), 1); else ::unsetenv("XDG_STATE_HOME");
 }
+
+void safe_self_test_tests(const Temp& temp) {
+    const auto scratch = temp.file("self-tests");
+    std::filesystem::create_directory(scratch);
+    struct RestoreTemp {
+        bool present;
+        std::string previous;
+        RestoreTemp() : present(std::getenv("TMPDIR") != nullptr), previous(present ? std::getenv("TMPDIR") : "") {}
+        ~RestoreTemp() { if (present) ::setenv("TMPDIR", previous.c_str(), 1); else ::unsetenv("TMPDIR"); }
+    } environment;
+    check(::setenv("TMPDIR", scratch.c_str(), 1) == 0, "safe test uses an isolated temporary parent");
+    std::atomic_bool cancel{false};
+    std::set<std::string> stages;
+    const auto result = run_self_test([&](const Progress& p) { stages.insert(p.stage); }, cancel);
+    check(result.bytes == 8ULL * 1024 * 1024 + 37 && result.sha256.size() == 64, "safe test verifies an image larger than one streaming chunk");
+    check(stages.contains("Writing") && stages.contains("Verifying"), "safe test exercises actual writing and readback");
+    check(std::filesystem::is_empty(scratch), "successful safe test removes its temporary files and directory");
+    fails([&] { run_self_test([&](const Progress& p) {
+        if (p.stage == "Writing" && p.done) cancel = true;
+    }, cancel); }, "safe test cancellation interrupts streaming");
+    check(std::filesystem::is_empty(scratch), "cancelled safe test removes accepted partial output");
+    cancel = false;
+    fails([&] { run_self_test([](const Progress& p) {
+        if (p.stage == "Preparing test" && p.done) throw Error("Injected test failure");
+    }, cancel); }, "safe test reports preparation failure");
+    check(std::filesystem::is_empty(scratch), "failed safe test leaves no sample or output files");
+    cancel = true;
+    try {
+        run_self_test({}, cancel);
+        check(false, "already-cancelled safe test must stop");
+    } catch (const Cancelled& error) {
+        check(std::string(error.what()).find("no USB drive was changed") != std::string::npos,
+              "safe cancellation explains that no USB drive was changed");
+    }
+    check(std::filesystem::is_empty(scratch), "early cancellation creates no temporary media");
+}
 }
 
 int main() {
@@ -363,6 +436,7 @@ int main() {
         writing_tests(temp);
         backup_and_scan_tests(temp);
         log_and_utility_tests(temp);
+        safe_self_test_tests(temp);
         std::cout << "Passed " << assertions << " core assertions; only temporary regular files were written.\n";
         return 0;
     } catch (const std::exception& error) {
