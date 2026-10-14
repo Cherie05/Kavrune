@@ -142,6 +142,11 @@ void topology_fixtures() {
     check(should_protect_mount(mounts[0], true), "root is always protected");
     check(!should_protect_mount(mounts[1], false), "desktop external media may be unmounted");
     check(should_protect_mount(mounts[2], true), "USB media bound as /home remains protected");
+    const auto account_critical = critical_mounts(mounts, {"/", "/media/My USB/alice"});
+    check(account_critical == std::set<size_t>({0, 1}), "a configured home inside /media selects its USB backing mount");
+    check(should_protect_mount(mounts[1], account_critical.contains(1)), "a user's actual home on desktop USB media is protected");
+    Mount ordinary_usb{static_cast<uint64_t>(makedev(8, 49)), "/media/Ordinary USB", "vfat", "/dev/sdd1"};
+    check(!should_protect_mount(ordinary_usb, false), "ordinary desktop USB media remains available after home protection");
     check(!should_protect_mount(mounts[3], false), "auxiliary Docker overlay does not globally disable USB writing");
     check(!should_protect_mount(mounts[4], false), "auxiliary desktop portal does not globally disable USB writing");
     check(should_protect_mount(mounts[7], false), "Btrfs filesystems require the entire device set");
@@ -164,6 +169,40 @@ void topology_fixtures() {
     for (const auto bad : {"", "1 0 8:1 / / rw", "1 0 8:1 / / rw - ext4", "1 0 8bad / / rw - ext4 /dev/sda1 rw"})
         rejected([&] { std::istringstream input(bad); (void)parse_mounts(input); }, "incomplete mount records cannot pass protection");
 }
+void home_directory_fixtures() {
+    using namespace kavrune;
+    char pattern[] = "/tmp/kavrune-home-test-XXXXXX";
+    const char* created = ::mkdtemp(pattern);
+    if (!created) throw std::runtime_error("Cannot create home protection fixtures");
+    struct Cleanup {
+        fs::path root;
+        ~Cleanup() { std::error_code ignored; fs::remove_all(root, ignored); }
+    } cleanup{created};
+    const auto configured = cleanup.root / "account";
+    const auto environment = cleanup.root / "usb-media" / "user";
+    const auto link = cleanup.root / "home-link";
+    fs::create_directories(configured);
+    fs::create_directories(environment);
+    fs::create_directory_symlink(environment, link);
+    const auto homes = home_directories(configured.string(), link.string());
+    check(homes == std::vector<std::string>({configured.string(), environment.string()}), "account and overridden symlink HOME are both canonicalized and protected");
+    const std::vector<Mount> mounts{
+        {static_cast<uint64_t>(makedev(8, 1)), "/", "ext4", "/dev/sda1"},
+        {static_cast<uint64_t>(makedev(8, 17)), environment.parent_path().string(), "ext4", "/dev/sdb1"}
+    };
+    check(critical_mounts(mounts, homes) == std::set<size_t>({0, 1}), "symlink HOME protects the filesystem containing its destination");
+    check(home_directories(configured.string(), configured.string()).size() == 1, "matching account and environment homes are deduplicated");
+    check(home_directories(configured.string(), "").size() == 1, "missing HOME cannot hide the account home");
+    check(home_directories(configured.string(), (cleanup.root / "absent").string()).size() == 1, "nonexistent optional HOME does not discard account protection");
+    rejected([&] { (void)home_directories("", ""); }, "missing account home fails closed");
+    rejected([&] { (void)home_directories("relative-home", ""); }, "relative account home fails closed");
+    rejected([&] { (void)home_directories((cleanup.root / "absent").string(), ""); }, "nonexistent account home fails closed");
+    const auto file = cleanup.root / "file";
+    std::ofstream(file) << "fixture";
+    rejected([&] { (void)home_directories(file.string(), ""); }, "account home must be a directory");
+    rejected([&] { (void)home_directories(configured.string(), file.string()); }, "existing unverifiable HOME cannot bypass protection");
+    check(fs::path(account_home()).is_absolute(), "the current account home is resolved through the account database");
+}
 }
 int main() {
     try {
@@ -171,6 +210,7 @@ int main() {
         eligibility_tests();
         format_tests();
         topology_fixtures();
+        home_directory_fixtures();
         std::cout << "Storage safety: " << checks << " checks passed (no devices opened).\n";
         return 0;
     } catch (const std::exception& error) {

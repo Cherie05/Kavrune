@@ -1,6 +1,17 @@
 #!/bin/sh
 set -eu
 cli="$1"
+python3 - "$cli" <<'PY'
+import json
+import subprocess
+import sys
+result = subprocess.run([sys.argv[1], 'self-test', '--json'], check=True, capture_output=True)
+data = json.loads(result.stdout)
+assert data['passed'] is True
+assert data['physical_usb_tested'] is False
+assert data['bytes'] == 8 * 1024 * 1024 + 37
+assert len(data['sha256']) == 64
+PY
 scratch=$(mktemp -d)
 trap 'rm -rf "$scratch"' EXIT HUP INT TERM
 python3 - "$scratch/source.img" <<'PY'

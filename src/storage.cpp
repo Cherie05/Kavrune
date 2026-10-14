@@ -3,6 +3,7 @@
 #include <gio/gunixfdlist.h>
 #include <algorithm>
 #include <cerrno>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -10,6 +11,7 @@
 #include <linux/fs.h>
 #include <map>
 #include <memory>
+#include <pwd.h>
 #include <set>
 #include <sstream>
 #include <sys/ioctl.h>
@@ -309,19 +311,63 @@ struct Protection {
     std::set<uint64_t> system, swap;
     std::string uncertainty;
 };
+std::string account_home() {
+    // The account database remains authoritative if HOME has been overridden.
+    // A bounded buffer avoids trusting an unbounded NSS record.
+    const long suggested = ::sysconf(_SC_GETPW_R_SIZE_MAX);
+    constexpr size_t maximum = 1024 * 1024;
+    size_t size = suggested > 0 ? std::min(static_cast<size_t>(suggested), maximum) : 16384;
+    for (;;) {
+        std::vector<char> buffer(size);
+        struct passwd entry {};
+        struct passwd* result = nullptr;
+        const int status = ::getpwuid_r(::geteuid(), &entry, buffer.data(), buffer.size(), &result);
+        if (status == ERANGE && size < maximum) {
+            size = std::min(size * 2, maximum);
+            continue;
+        }
+        if (status != 0 || !result || !entry.pw_dir || !*entry.pw_dir || !fs::path(entry.pw_dir).is_absolute())
+            throw Error("Cannot identify the current account's home directory");
+        return entry.pw_dir;
+    }
+}
+void append_critical_directory(std::vector<std::string>& directories, const std::string& path, bool required) {
+    if (path.empty()) {
+        if (required) throw Error("A required storage protection directory is missing");
+        return;
+    }
+    std::error_code error;
+    if (!fs::exists(path, error)) {
+        if (error || required) throw Error("Cannot inspect a required storage protection directory");
+        return;
+    }
+    if (!fs::is_directory(path, error) || error)
+        throw Error("A storage protection path is not a verifiable directory");
+    const auto resolved = fs::canonical(path, error);
+    if (error) throw Error("Cannot resolve a storage protection directory");
+    const auto canonical = resolved.string();
+    if (std::find(directories.begin(), directories.end(), canonical) == directories.end())
+        directories.push_back(canonical);
+}
+std::vector<std::string> home_directories(const std::string& configured, const std::string& environment) {
+    if (configured.empty() || !fs::path(configured).is_absolute())
+        throw Error("The account home directory must be an absolute path");
+    std::vector<std::string> directories;
+    append_critical_directory(directories, configured, true);
+    append_critical_directory(directories, environment, false);
+    return directories;
+}
 Protection protections() {
     Protection result;
     try {
         auto mounts = read_mounts();
         std::vector<std::string> directories;
         for (const auto* path : {"/", "/home", "/boot", "/boot/efi", "/usr", "/var", "/etc", "/opt", "/srv", "/root"}) {
-            std::error_code error;
-            if (!fs::exists(path, error)) {
-                if (error) throw Error("Cannot inspect a critical system directory");
-                continue;
-            }
-            directories.push_back(fs::canonical(path).string());
+            append_critical_directory(directories, path, false);
         }
+        const char* environment_home = std::getenv("HOME");
+        const auto homes = home_directories(account_home(), environment_home ? environment_home : "");
+        directories.insert(directories.end(), homes.begin(), homes.end());
         const auto critical = critical_mounts(mounts, directories);
         bool found_root = false;
         for (size_t index = 0; index < mounts.size(); ++index) {

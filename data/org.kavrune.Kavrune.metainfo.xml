@@ -6,6 +6,8 @@
   <description><p>A native Linux application for streaming raw disk images to external USB drives, verifying every written byte, formatting drives, creating backups and comparing image checksums.</p><p>Version 0.1 is a development preview. Windows installer extraction and distribution-specific persistence are planned.</p></description>
   <launchable type="desktop-id">org.kavrune.Kavrune.desktop</launchable>
   <developer id="org.kavrune"><name>Kavrune contributors</name></developer>
+  <url type="homepage">https://github.com/Cherie05/Kavrune</url>
+  <url type="bugtracker">https://github.com/Cherie05/Kavrune/issues</url>
   <content_rating type="oars-1.1"/>
   <releases><release version="0.1.0" date="2026-10-14" type="development"/></releases>
 </component>
