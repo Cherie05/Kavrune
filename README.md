@@ -4,6 +4,8 @@ An independently implemented Linux desktop application for creating and verifyin
 
 **0.1.0 is a development preview.** Production qualification, physical USB testing and independent security review remain pending. Kavrune is an independent project with original source and artwork; the selected project name does not imply completed trademark clearance.
 
+**No warranty; use at your own risk.** Kavrune is provided "as is". To the fullest extent permitted by applicable law, its authors and copyright holders are not responsible or liable for claims, damages or losses arising from the software or its use, including data loss, corrupted media or device and system damage. Keep independent backups and review the [disclaimer](DISCLAIMER.md) and [MIT License](LICENSE).
+
 ![Kavrune native desktop preview](docs/preview.png)
 
 ## Start the application

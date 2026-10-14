@@ -5,6 +5,14 @@ The project's original source, documentation, stylesheet, and SVG icon are
 licensed under the MIT License in LICENSE. Contributions retain their authors'
 copyrights and must be submitted with compatible licensing and provenance.
 
+KAVRUNE IS PROVIDED "AS IS", WITHOUT WARRANTY. TO THE FULLEST EXTENT PERMITTED
+BY APPLICABLE LAW, ITS AUTHORS AND COPYRIGHT HOLDERS ACCEPT NO RESPONSIBILITY
+OR LIABILITY FOR CLAIMS, DAMAGES, LOSSES OR OTHER LIABILITY ARISING FROM THE
+SOFTWARE OR ITS USE, INCLUDING DATA LOSS AND DEVICE OR SYSTEM DAMAGE.
+
+The MIT License contains the governing warranty and liability terms. This
+notice does not change its permissions or conditions.
+
 Third-party shared libraries and system services keep their respective licenses.
 See THIRD_PARTY_LICENSES.md for dependency notices and upstream references.
 Those components are not relicensed by this notice. No operating-system image

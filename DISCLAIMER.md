@@ -1,4 +1,14 @@
-# Storage and project disclaimer
+# Storage, warranty and liability notice
+
+## No warranty or liability
+
+Kavrune is provided "as is", without warranties or guarantees of any kind, as stated in the [MIT License](LICENSE). There is no warranty of merchantability, fitness for a particular purpose, reliability, uninterrupted operation or freedom from errors.
+
+To the fullest extent permitted by applicable law, the authors and copyright holders are not responsible or liable for any claims, damages, losses or other liability arising from Kavrune or its use, including lost or corrupted data, unusable media, device or system damage, interrupted work or lost profits. Users are responsible for selecting the intended target drive and keeping independent backups.
+
+The MIT License contains the governing warranty disclaimer and limitation of liability. This notice explains those terms and operational limits; it does not add conditions or restrictions to the license or exclude rights and liabilities that applicable law does not permit to be excluded.
+
+## Storage and development limits
 
 Kavrune 0.1 is a development preview. Physical USB qualification, the complete distribution/firmware test matrix and independent security review remain pending. It is not represented as a certified production or enterprise release. See [VALIDATION.md](docs/VALIDATION.md).
 
@@ -8,6 +18,8 @@ A checksum verifies byte consistency against a supplied value; it does not estab
 
 Kavrune runs through system UDisks2 and Polkit authorization. It does not include telemetry or upload images, drive contents or logs. Local activity logs can contain device identifiers and paths; review and redact them before sharing.
 
-Kavrune is an independently implemented project, with original project source and artwork. It is not affiliated with, endorsed by or an official Linux version of Rufus or any other USB utility. Third-party product names and components remain subject to their owners' rights. Choosing the Kavrune name is not a guarantee of trademark clearance.
+## Independent project and dependencies
+
+Kavrune has independently written project source and original artwork. Third-party libraries and system services retain their owners' rights and licenses. Choosing the Kavrune name is not a guarantee of trademark clearance.
 
 Original project files are available under the [MIT License](LICENSE), including its warranty and liability terms. Dependencies retain their own licenses as described in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md). This document explains use limitations; it does not add conditions or restrictions to the MIT License.

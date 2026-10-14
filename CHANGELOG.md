@@ -9,5 +9,6 @@
 - Offer GPT/MBR formatting, raw backups, image checksums and read-only drive scans.
 - Include safe regular-file regression tests, sanitizer configuration, optional synthetic BIOS boot testing and Debian packaging.
 - Add MIT licensing, third-party notices, security reporting guidance, storage disclaimer, contribution and conduct policies, GitHub templates and repository ignore rules.
+- Describe Kavrune independently and make no-warranty and damage-liability notices explicit in the README, NOTICE and disclaimer, subject to applicable law and the MIT License.
 
 This entry describes preview functionality and repository preparation, not a published stable release. Physical USB and production qualification remain pending. Windows installer preparation, persistence and other later features are tracked in [ROADMAP.md](docs/ROADMAP.md).
