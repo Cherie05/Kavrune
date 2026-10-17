@@ -15,6 +15,97 @@ bool enabled(GtkWidget* widget) { return gtk_widget_get_sensitive(widget); }
 std::string text(GtkWidget* widget) { return gtk_label_get_text(GTK_LABEL(widget)); }
 
 struct DesktopUiTest {
+    static void progress_regressions(Desktop& ui) {
+        const uint64_t bytes = 8 * 1024 * 1024;
+        ui.busy_ = true;
+        ui.progress_usb_creation_ = true;
+        ui.progress_started_ = std::chrono::steady_clock::now();
+        ui.apply_progress({"Checking source", bytes, bytes, 0, ""});
+        workflow_check(gtk_progress_bar_get_fraction(GTK_PROGRESS_BAR(ui.progress_bar_)) < 1,
+                       "finishing the source check never presents the complete operation as finished");
+        ui.apply_progress({"Writing", bytes, bytes, 0, ""});
+        const double written_fraction = gtk_progress_bar_get_fraction(GTK_PROGRESS_BAR(ui.progress_bar_));
+        workflow_check(written_fraction > 0 && written_fraction < 1,
+                       "finishing the write reserves visible progress for saving and verification");
+        ui.apply_progress({"Synchronizing", bytes, bytes, 0,
+                           "Cancellation waits until buffered writes have been synchronized."});
+        workflow_check(gtk_progress_bar_get_fraction(GTK_PROGRESS_BAR(ui.progress_bar_)) < 1,
+                       "the synchronization stage does not display a completed progress bar");
+        workflow_check(gtk_spinner_get_spinning(GTK_SPINNER(ui.progress_spinner_)),
+                       "synchronization visibly animates while the storage worker is waiting");
+        workflow_check(ui.progress_timer_ != 0,
+                       "synchronization owns a main-thread heartbeat independent of worker callbacks");
+        workflow_check(text(ui.progress_title_).find("still working") != std::string::npos,
+                       "the synchronization heading explicitly says the application is still working");
+        workflow_check(text(ui.progress_detail_).find("connected") != std::string::npos &&
+                       text(ui.progress_detail_).find("100%") == std::string::npos,
+                       "saving guidance asks users to keep the USB connected without claiming completion");
+        workflow_check(std::string(gtk_progress_bar_get_text(GTK_PROGRESS_BAR(ui.progress_bar_))).find("Step") != std::string::npos,
+                       "USB creation describes progress as workflow steps rather than a misleading overall percentage");
+
+        const auto detail_before_tick = text(ui.progress_detail_);
+        const auto heartbeat = ui.progress_timer_;
+        ui.progress_started_ -= std::chrono::seconds(75);
+        auto* source = g_main_context_find_source_by_id(nullptr, heartbeat);
+        workflow_check(source != nullptr, "the progress heartbeat is attached to the GTK main context");
+        g_source_set_ready_time(source, 0);
+        for (unsigned i = 0; i < 16 && g_main_context_pending(nullptr); ++i)
+            g_main_context_iteration(nullptr, FALSE);
+        workflow_check(text(ui.progress_detail_) != detail_before_tick,
+                       "the synchronization status updates elapsed time without another worker event");
+        workflow_check(ui.progress_timer_ == heartbeat,
+                       "a heartbeat update reuses the same source rather than creating duplicate timers");
+
+        ui.apply_progress({"Verifying", bytes / 2, bytes, 0, ""});
+        workflow_check(gtk_progress_bar_get_fraction(GTK_PROGRESS_BAR(ui.progress_bar_)) >= written_fraction &&
+                       gtk_progress_bar_get_fraction(GTK_PROGRESS_BAR(ui.progress_bar_)) < 1,
+                       "readback verification advances overall progress while keeping completion pending");
+        ui.apply_progress({"Verifying", bytes, bytes, 0, ""});
+        workflow_check(gtk_progress_bar_get_fraction(GTK_PROGRESS_BAR(ui.progress_bar_)) < 1,
+                       "a full verification callback alone cannot claim final operation success");
+        ui.apply_progress({"Complete", bytes, bytes, 0, ""});
+        workflow_check(gtk_progress_bar_get_fraction(GTK_PROGRESS_BAR(ui.progress_bar_)) < 1 &&
+                       text(ui.progress_title_).find("please wait") != std::string::npos,
+                       "the writer's last callback still waits for final release before claiming success");
+        ui.cancel_->store(true);
+        ui.apply_progress({"Synchronizing", bytes, bytes, 0, ""});
+        workflow_check(text(ui.progress_title_).find("Stopping safely") != std::string::npos &&
+                       text(ui.progress_detail_).find("Cancellation") != std::string::npos,
+                       "cancelling while saving explains that the drive must first stop safely");
+        workflow_check(ui.progress_timer_ == heartbeat && gtk_spinner_get_spinning(GTK_SPINNER(ui.progress_spinner_)),
+                       "a cancellation request keeps activity visible until the blocked save finishes");
+        ui.busy_ = false;
+        ui.finish_progress(false);
+        workflow_check(ui.progress_timer_ == 0 && !gtk_spinner_get_spinning(GTK_SPINNER(ui.progress_spinner_)),
+                       "a failed or cancelled operation releases its heartbeat and stops the spinner");
+        workflow_check(gtk_progress_bar_get_fraction(GTK_PROGRESS_BAR(ui.progress_bar_)) < 1,
+                       "a failed or cancelled operation never leaves a completed progress bar");
+
+        ui.busy_ = true;
+        ui.cancel_->store(false);
+        ui.progress_usb_creation_ = false;
+        ui.progress_started_ = std::chrono::steady_clock::now();
+        ui.apply_progress({"Synchronizing", bytes, bytes, 0, ""});
+        workflow_check(text(ui.progress_detail_).find("source and destination") != std::string::npos &&
+                       text(ui.progress_detail_).find("Verification comes next") == std::string::npos,
+                       "backup synchronization describes its source and destination without promising USB creation steps");
+        ui.apply_progress({"Creating partition table", 0, 2, 0, ""});
+        workflow_check(text(ui.progress_detail_).find("B /") == std::string::npos &&
+                       gtk_spinner_get_spinning(GTK_SPINNER(ui.progress_spinner_)),
+                       "formatting's numbered steps stay animated without displaying step counts as byte sizes");
+        ui.apply_progress({"Synchronizing", bytes, bytes, 0, ""}, true);
+        workflow_check(gtk_spinner_get_spinning(GTK_SPINNER(ui.progress_spinner_)) && ui.progress_timer_ != 0,
+                       "a later safe test restarts activity after a previous operation has stopped");
+        workflow_check(text(ui.progress_detail_).find("No USB") != std::string::npos,
+                       "the safe test explicitly identifies temporary files instead of a physical USB");
+        ui.busy_ = false;
+        ui.finish_progress(true);
+        workflow_check(gtk_progress_bar_get_fraction(GTK_PROGRESS_BAR(ui.progress_bar_)) == 1,
+                       "only explicit successful completion fills the complete progress bar");
+        workflow_check(ui.progress_timer_ == 0 && !gtk_spinner_get_spinning(GTK_SPINNER(ui.progress_spinner_)),
+                       "successful completion releases animation just as failure does");
+    }
+
     static void run(AdwApplication* app) {
         auto desktop = std::make_shared<Desktop>(app);
         struct WindowCleanup {
@@ -87,6 +178,9 @@ struct DesktopUiTest {
         ui.image_ = image; ui.busy_ = true; ui.can_cancel_ = true; ui.update_controls();
         workflow_check(!enabled(ui.create_) && !enabled(ui.format_) && !enabled(ui.backup_) && !enabled(ui.scan_) && !enabled(ui.check_),
                        "every operation is disabled while another operation is running");
+        workflow_check(text(ui.review_text_).find(image.name) != std::string::npos &&
+                       text(ui.review_text_).find(drive.model) != std::string::npos,
+                       "the exact image and USB remain visible while the operation is running");
         for (auto* widget : ui.dropdowns_)
             workflow_check(!enabled(widget), "target controls cannot change during an operation");
         workflow_check(enabled(ui.cancel_button_), "a cancellable operation offers cancellation");
@@ -129,6 +223,7 @@ struct DesktopUiTest {
         workflow_check(!enabled(ui.create_) && !enabled(ui.check_) && enabled(ui.format_) && enabled(ui.backup_) && enabled(ui.scan_),
                        "resetting a source does not discard the selected physical USB");
         workflow_check(!enabled(ui.copy_hash_), "resetting a source removes the previous checksum copy action");
+        progress_regressions(ui);
         workflow_check(!gtk_widget_get_visible(ui.window_), "functional regression never opens a visible app window");
     }
 };

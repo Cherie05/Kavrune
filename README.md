@@ -2,7 +2,7 @@
 
 An independently implemented Linux desktop application for creating and verifying USB installation media. Written in C++20 with GTK4/libadwaita, GIO D-Bus, and OpenSSL. Project source and original icon are MIT licensed.
 
-**0.1.0 is a development preview.** Production qualification, physical USB testing and independent security review remain pending. Kavrune is an independent project with original source and artwork; the selected project name does not imply completed trademark clearance.
+**0.1.0 is a development preview.** Production qualification, broader physical USB validation and independent security review remain pending. Kavrune is an independent project with original source and artwork; the selected project name does not imply completed trademark clearance.
 
 **No warranty; use at your own risk.** Kavrune is provided "as is". To the fullest extent permitted by applicable law, its authors and copyright holders are not responsible or liable for claims, damages or losses arising from the software or its use, including data loss, corrupted media or device and system damage. Keep independent backups and review the [disclaimer](DISCLAIMER.md) and [MIT License](LICENSE).
 
@@ -22,7 +22,7 @@ First click **Try a safe test** on **Create USB**. It uses temporary files to ex
 
 For your first physical trial, use a spare USB with no important files. **Create USB** explains what to prepare before starting and how to start a computer from the finished USB. You do not need to format the USB first. Choose the downloaded Linux image, open **Choose a USB drive…**, select your USB by its name and size, and review the erasure confirmation. The chosen drive stays selected across tools and refreshes while the same physical device remains connected.
 
-Kavrune writes the image, saves buffered data, verifies the written portion using SHA-256, and requests a device rescan before reporting success. Leave the USB connected until **Written and verified**. A verified write is separate from a boot test on the intended computer.
+Kavrune shows five stages: check the image, write, save buffered data, verify, and finish. Saving can take time even after all image bytes have been written; an animated indicator and elapsed time show that the operation is still running. The overall bar reaches 100% only after the operation finishes, including verification and the final device rescan. Leave the USB connected until **Written and verified**. A verified write is separate from a boot test on the intended computer.
 
 Read the [beginner guide](docs/GETTING_STARTED.md) for each step, use the [USB test checklist](docs/USER_TEST_CHECKLIST.md) to record your results, and see [feature status](docs/FEATURE_STATUS.md) for what remains to qualify.
 

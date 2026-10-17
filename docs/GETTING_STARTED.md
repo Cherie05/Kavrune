@@ -30,10 +30,14 @@ Use **Create USB** to make an installer. You do not need to use **Format USB**, 
 3. Plug in a spare USB. Copy any files you want to keep to a different drive first. The ISO must also be stored on a different drive.
 4. Open **Create USB** and choose your installer file. Open **Choose a USB drive…** and select your USB by its name and size. The selection summary, drive details and review must name that same drive. Your chosen USB remains selected when visiting other tools or refreshing while it stays connected. Disconnecting it clears the selection; another drive is never silently chosen. Internal and system drives are protected; some adapters cannot supply enough identity information and are refused.
 5. Review the selected file and USB. The USB must have enough space for the file. Click **Create USB…** and carefully review the drive name, size, device path and serial in the confirmation. Creating an installer replaces the USB's files and partitions.
-6. Confirm only when you recognize the target. Type the drive name displayed in the confirmation, then click **Erase USB and create**. Approve the Linux password prompt if shown. Leave the USB connected while writing, saving buffered data, and checking the result. A percentage reaching 100% during writing is not the final success message.
+6. Confirm only when you recognize the target. Type the drive name displayed in the confirmation, then click **Erase USB and create**. Approve the Linux password prompt if shown. The app shows five stages: checking the image, writing, saving buffered data, verifying, and finishing. Keep the USB connected through all five stages.
 7. Wait for **Written and verified**. Then use your desktop's eject or safely remove action before unplugging the USB.
 
-If you cancel or an error occurs, the USB can contain an incomplete installer. Create it again before relying on it. Cancellation may wait for buffered writes to finish; leave the USB connected until the app stops the operation.
+During **Saving to the USB — still working**, Linux is asking the drive to finish saving buffered data. This step has an animated indicator and elapsed time because the drive cannot provide a reliable remaining-time estimate. It can continue after all image bytes have been written; verification comes next. The overall progress bar reaches 100% only after the complete operation returns successfully, including the final device refresh.
+
+See the [saving-stage preview](progress-saving.png), illustrated with an example image and USB.
+
+If you cancel, **Stopping safely** can remain visible while buffered data is saved. Leave the USB connected until the operation stops. A cancelled or failed write can leave an incomplete installer; create it again before relying on it.
 
 ## How to know whether it worked
 
