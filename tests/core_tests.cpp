@@ -147,6 +147,116 @@ std::vector<unsigned char> gpt_fixture() {
     return data;
 }
 
+void refresh_isohybrid_gpt(std::vector<unsigned char>& data) {
+    constexpr size_t table_bytes = 248 * 128;
+    auto* header = data.data() + 512;
+    le32(header + 88, crc32(data.data() + 1024, table_bytes));
+    le32(header + 16, 0);
+    le32(header + 16, crc32(header, 92));
+    std::copy_n(data.data() + 1024, table_bytes, data.data() + 193 * 512);
+    auto* backup = data.data() + 255 * 512;
+    std::copy_n(header, 512, backup);
+    le64(backup + 24, 255); le64(backup + 32, 1); le64(backup + 72, 193);
+    le32(backup + 16, 0);
+    le32(backup + 16, crc32(backup, 92));
+}
+
+std::vector<unsigned char> gpt_isohybrid_fixture(bool windows = false) {
+    // Original small fixture: the ISO carrier deliberately includes its own
+    // partition metadata, as used by some bootable ISO generators.
+    auto data = iso_fixture(false, windows, true);
+    data.resize(256 * 512);
+    auto* pvd = data.data() + 16 * 2048;
+    le32(pvd + 80, 64); be32(pvd + 84, 64);
+    data[510] = 0x55; data[511] = 0xaa;
+    data[446] = 0x80;
+    le32(data.data() + 454, 0); le32(data.data() + 458, 256);
+    data[466] = 0xef;
+    le32(data.data() + 470, 96); le32(data.data() + 474, 8);
+    auto* header = data.data() + 512;
+    std::memcpy(header, "EFI PART", 8);
+    le32(header + 8, 0x10000); le32(header + 12, 92);
+    le64(header + 24, 1); le64(header + 32, 255);
+    le64(header + 40, 64); le64(header + 48, 192);
+    header[56] = 1;
+    le64(header + 72, 2); le32(header + 80, 248); le32(header + 84, 128);
+    constexpr std::array<unsigned char, 16> basic_data_guid{
+        0xa2, 0xa0, 0xd0, 0xeb, 0xe5, 0xb9, 0x33, 0x44,
+        0x87, 0xc0, 0x68, 0xb6, 0xb7, 0x26, 0x99, 0xc7};
+    auto* carrier = data.data() + 1024;
+    std::copy(basic_data_guid.begin(), basic_data_guid.end(), carrier);
+    carrier[16] = 2;
+    le64(carrier + 32, 0); le64(carrier + 40, 191);
+    auto* efi = carrier + 128;
+    std::copy(basic_data_guid.begin(), basic_data_guid.end(), efi);
+    efi[16] = 3;
+    le64(efi + 32, 96); le64(efi + 40, 103);
+    refresh_isohybrid_gpt(data);
+    return data;
+}
+
+void isohybrid_inspection_tests(const Temp& temp) {
+    const auto image = temp.file("hybrid-gpt.img");
+    const auto fixture = gpt_isohybrid_fixture();
+    put(image, fixture);
+    const auto info = inspect_image(image);
+    check(info.kind == "Hybrid ISO" && info.raw_writable && info.bootable,
+          "bootable GPT ISO with an active type-zero MBR carrier is supported");
+    const auto reject = [&](const std::function<void(std::vector<unsigned char>&)>& modify,
+                            const std::string& description, bool refresh = true) {
+        auto broken = fixture;
+        modify(broken);
+        if (refresh) refresh_isohybrid_gpt(broken);
+        put(image, broken);
+        fails([&] { inspect_image(image); }, description);
+    };
+    reject([](auto& data) { std::fill_n(data.data() + 16 * 2048 + 1, 5, 0); },
+           "a raw GPT prefix without a validated ISO cannot use the sector-zero exception");
+    reject([](auto& data) { data[22 * 2048 + 32] = 0; },
+           "a nonbootable ISO cannot use the sector-zero exception");
+    reject([](auto& data) { data[446] = 0; },
+           "the type-zero hybrid MBR carrier must be active");
+    reject([](auto& data) { data[450] = 0x17; },
+           "a different MBR type cannot enable the GPT sector-zero exception");
+    reject([](auto& data) { le32(data.data() + 458, 255); },
+           "the hybrid MBR carrier must cover the whole image");
+    reject([](auto& data) { le32(data.data() + 458, 257); },
+           "the hybrid MBR carrier cannot extend beyond the image");
+    reject([](auto& data) { le32(data.data() + 470, 250); },
+           "remaining hybrid MBR entries must also fit within the image");
+    reject([](auto& data) { data[511] = 0; },
+           "a hybrid MBR requires its signature");
+    reject([](auto& data) { std::swap_ranges(data.data() + 1024, data.data() + 1152, data.data() + 1152); },
+           "only the first GPT entry may be the sector-zero ISO carrier");
+    reject([](auto& data) { data[1024] ^= 1; },
+           "the sector-zero GPT carrier must have the Basic Data type GUID");
+    reject([](auto& data) { le64(data.data() + 1024 + 32, 1); },
+           "a nonzero GPT start below the usable range remains invalid");
+    reject([](auto& data) { le64(data.data() + 1024 + 40, 63); },
+           "the sector-zero GPT carrier must reach the usable range");
+    reject([](auto& data) { le64(data.data() + 1024 + 40, 193); },
+           "the sector-zero GPT carrier cannot exceed the last usable LBA");
+    reject([](auto& data) { le64(data.data() + 1024 + 40, 256); },
+           "a hybrid GPT partition cannot extend beyond the image");
+    reject([](auto& data) {
+        le64(data.data() + 1024 + 32, 96); le64(data.data() + 1024 + 40, 95);
+    }, "reversed GPT partition bounds remain invalid in a hybrid ISO");
+    reject([](auto& data) { data[512 + 16] ^= 1; },
+           "hybrid recognition does not bypass the GPT header CRC", false);
+    reject([](auto& data) { data[1024 + 16] ^= 1; },
+           "hybrid recognition does not bypass the GPT table CRC", false);
+    reject([](auto& data) { data[16 * 2048 + 84] ^= 1; },
+           "hybrid recognition still rejects malformed ISO volume descriptors");
+    reject([](auto& data) { data[22 * 2048 + 28] ^= 1; },
+           "hybrid recognition still validates the El Torito catalog checksum");
+    reject([](auto& data) { data.resize(data.size() - 1); },
+           "truncated hybrid ISO images remain invalid", false);
+    put(image, gpt_isohybrid_fixture(true));
+    const auto windows = inspect_image(image);
+    check(windows.kind == "Windows installation ISO" && !windows.raw_writable,
+          "recognizing a GPT ISO carrier does not enable raw writing of Windows installers");
+}
+
 void inspection_tests(const Temp& temp) {
     const auto empty = temp.file("empty.img"); put(empty, {});
     fails([&] { inspect_image(empty); }, "empty image must fail");
@@ -432,6 +542,7 @@ int main() {
     try {
         Temp temp;
         inspection_tests(temp);
+        isohybrid_inspection_tests(temp);
         checksum_tests(temp);
         writing_tests(temp);
         backup_and_scan_tests(temp);
