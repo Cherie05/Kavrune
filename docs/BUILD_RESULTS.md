@@ -1,6 +1,6 @@
 # Local validation — 14–17 October 2026
 
-Build host: Ubuntu 26.04.1 LTS x86_64, GCC 15.2, GTK 4.22.4, libadwaita 1.9.1, GLib/GIO 2.88.0, OpenSSL 3.5.5. Build dependencies were extracted under `.deps`; no system package installation or physical-device writing occurred.
+Build host: Ubuntu 26.04.1 LTS x86_64, GCC 15.2, GTK 4.22.4, libadwaita 1.9.1, GLib/GIO 2.88.0, OpenSSL 3.5.5. Build dependencies were extracted under `.deps` without system package installation. Agent-run write tests used temporary files; a later user-initiated physical USB trial is recorded separately below.
 
 ## Baseline before the beginner workflow update
 
@@ -100,6 +100,26 @@ The completed sanitizer build validated:
 - Visual QA reported no GTK warnings or application failures. Standard error contained only expected headless DRI3/libEGL acceleration warnings. The file chooser and live USB selection were not exercised in this visual run; the hidden desktop tests above cover selection-control logic. No storage operation or confirmation was invoked, and the isolated QA processes were stopped afterward.
 
 Earlier counts elsewhere in this document apply to their respective revisions. No physical USB writing, formatting, authorization prompt or firmware boot has been qualified by this review. Use [USER_TEST_CHECKLIST.md](USER_TEST_CHECKLIST.md) to record a separate spare-USB trial.
+
+## User-initiated Alpine USB trial — 17 October 2026
+
+The application log records a user-initiated trial on revision `40f7957`: **Creating your USB** at 23:18:37 IST, followed by **USB written and verified** at 23:21:50 IST. The selected image was Alpine Extended 3.24.2 x86_64 and the target was a Cruzer Blade reported as 29.2 GiB. The recorded written-image SHA-256 was `a22115a46a1bcd876234a6cd43797fe19f4acfc4512fb41ea64e16cc2ffb4d90`, matching the Alpine image recorded above.
+
+This is one observed application-log success from the user's physical trial, not an agent-initiated destructive test or an independently witnessed boot result. No result is available for starting a computer from that USB. It does not qualify other USB hardware, formatting, all authorization paths, BIOS/UEFI/Secure Boot, or enterprise deployment.
+
+## Save-stage progress update
+
+Following the user's trial, the desktop now distinguishes checking the image, writing, saving buffered data, verification, and finalization. Saving and finalization use an animated indicator and elapsed-time updates instead of displaying a completed operation while a blocking storage call is still running. Overall 100% is reserved for a successful return after verification and device rescan. Cancellation explains that buffered data must be saved before stopping; failures and cancellation stop the animation without showing successful completion.
+
+The update also keeps the chosen image and USB visible during the operation, marks the image as in progress, and rejects stale progress callbacks from an earlier operation. It changes desktop progress reporting, not the I/O engine. The physical trial above used the earlier build; it does not validate the new progress display.
+
+The rebuilt update passed all seven standard CTest suites in **1.65 seconds** and all seven AddressSanitizer/UndefinedBehaviorSanitizer suites in **3.65 seconds**, with no new compiler warnings. Coverage is **194 core + 122 storage + 329 GTK selection + 80 actual desktop-workflow assertions = 725 checks**. The desktop checks include progress/finalization behavior without physical USB operations. Leak detection remains disabled only for the two GTK suites because of process-wide GTK caches.
+
+CTest now locates and uses a private X11/Xvfb session when the wrapper is available. A separate run of both GTK suites from a shell without the local development environment passed in **0.73 seconds**, checking that the test runner does not depend on sourcing the developer's environment first.
+
+`scripts/package.sh` passed all seven standard suites in **1.63 seconds** and rebuilt the Debian package and direct dependency SPDX inventory. Extraction without installation confirmed current executable build IDs and guides/notices, no RPATH/RUNPATH or privileged files, and a passing disposable-file CLI self-test with `physical_usb_tested: false`.
+
+A temporary preview harness rendered the saving stage on a private X11/Xvfb and D-Bus session with synthetic image/USB details, without starting discovery or a storage operation. The [saving-stage preview](progress-saving.png) shows the spinner, activity bar, step 3 of 5, elapsed time and retained selection review. The preview exited successfully and its private processes closed; no GTK warnings or criticals were reported, only headless graphics/session diagnostics.
 
 ## Published revision CI
 

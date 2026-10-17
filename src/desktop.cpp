@@ -78,7 +78,7 @@ class Desktop : public std::enable_shared_from_this<Desktop> {
     friend struct DesktopUiTest;
     AdwApplication* app_;
     GtkWidget *window_ = nullptr, *stack_ = nullptr, *sidebar_ = nullptr, *split_ = nullptr, *navigation_ = nullptr;
-    GtkWidget *progress_card_ = nullptr, *progress_bar_ = nullptr, *progress_title_ = nullptr, *progress_detail_ = nullptr, *cancel_button_ = nullptr;
+    GtkWidget *progress_card_ = nullptr, *progress_bar_ = nullptr, *progress_title_ = nullptr, *progress_detail_ = nullptr, *cancel_button_ = nullptr, *progress_spinner_ = nullptr;
     GtkWidget *progress_technical_ = nullptr, *progress_expander_ = nullptr;
     GtkWidget *source_name_ = nullptr, *source_description_ = nullptr, *source_size_ = nullptr, *image_hash_ = nullptr, *source_technical_ = nullptr;
     GtkWidget *create_hint_ = nullptr, *review_text_ = nullptr, *image_status_ = nullptr;
@@ -97,6 +97,11 @@ class Desktop : public std::enable_shared_from_this<Desktop> {
     std::shared_ptr<std::atomic_bool> cancel_ = std::make_shared<std::atomic_bool>(false);
     bool busy_ = false, can_cancel_ = false, refreshing_ = false, syncing_selection_ = false, close_after_ = false;
     guint timer_ = 0;
+    guint progress_timer_ = 0;
+    uint64_t operation_id_ = 0;
+    Progress progress_current_;
+    bool progress_indeterminate_ = false, progress_test_files_ = false, progress_usb_creation_ = false;
+    std::chrono::steady_clock::time_point progress_started_, progress_stage_started_;
     unsigned selected_ = GTK_INVALID_LIST_POSITION;
 
     void post(Fn fn) {
@@ -203,9 +208,9 @@ class Desktop : public std::enable_shared_from_this<Desktop> {
         gtk_widget_set_sensitive(copy_hash_, !busy_ && !digest_.empty());
         gtk_widget_set_visible(cancel_button_, busy_);
         if (!image_.path.empty()) {
-            gtk_label_set_text(GTK_LABEL(image_status_), checksum_failed_ ? _("Checksum mismatch — blocked") : image_.raw_writable ? (image_.bootable ? _("Ready to write") : _("Check image source")) : image_.kind == "Checksum-only file" ? _("Checksum only") : _("Different creation method needed"));
+            gtk_label_set_text(GTK_LABEL(image_status_), busy_ ? _("Operation in progress") : checksum_failed_ ? _("Checksum mismatch — blocked") : image_.raw_writable ? (image_.bootable ? _("Ready to write") : _("Check image source")) : image_.kind == "Checksum-only file" ? _("Checksum only") : _("Different creation method needed"));
             gtk_widget_remove_css_class(image_status_, "success"); gtk_widget_remove_css_class(image_status_, "warning");
-            gtk_widget_add_css_class(image_status_, !checksum_failed_ && image_.raw_writable && image_.bootable ? "success" : "warning");
+            if (!busy_) gtk_widget_add_css_class(image_status_, !checksum_failed_ && image_.raw_writable && image_.bootable ? "success" : "warning");
         }
         std::string hint;
         if (busy_) hint = _("Wait for the current operation to finish, or cancel it.");
@@ -218,7 +223,7 @@ class Desktop : public std::enable_shared_from_this<Desktop> {
         else hint = _("Ready. Back up anything on this USB before continuing.");
         gtk_label_set_text(GTK_LABEL(create_hint_), hint.c_str());
         gtk_widget_set_tooltip_text(create_, hint.c_str());
-        const std::string review = ready ? image_.name + " → " + (d->model.empty() ? _("External drive") : d->model) + " (" + human_size(d->size) + ")" : _("Your image and USB will appear here when both are selected.");
+        const std::string review = d && !image_.path.empty() ? image_.name + " → " + (d->model.empty() ? _("External drive") : d->model) + " (" + human_size(d->size) + ")" : _("Your image and USB will appear here when both are selected.");
         gtk_label_set_text(GTK_LABEL(review_text_), review.c_str());
     }
     void record(const std::string& text) {
@@ -239,6 +244,102 @@ class Desktop : public std::enable_shared_from_this<Desktop> {
     void technical_result(const std::string& detail) {
         gtk_label_set_text(GTK_LABEL(progress_technical_), detail.c_str());
         gtk_widget_set_visible(progress_expander_, !detail.empty());
+    }
+    static std::string elapsed_text(std::chrono::steady_clock::time_point start) {
+        const auto seconds = std::max<int64_t>(0, std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start).count());
+        std::ostringstream value;
+        value << seconds / 60 << ':' << std::setfill('0') << std::setw(2) << seconds % 60;
+        return value.str();
+    }
+    void refresh_progress_detail() {
+        const auto& p = progress_current_;
+        const bool stopping = cancel_->load();
+        std::ostringstream detail;
+        if (p.stage == "Synchronizing") {
+            if (progress_test_files_) detail << _("Saving the temporary test file. No USB is used or changed.");
+            else if (progress_usb_creation_) {
+                detail << _("Waiting for the USB to finish saving buffered data. Keep it connected.");
+                if (!stopping) detail << ' ' << _("Verification comes next.");
+            }
+            else detail << _("Waiting for buffered data to finish saving. Keep the source and destination connected.");
+            if (stopping) detail << ' ' << _("Cancellation will finish after saving stops safely.");
+            detail << '\n' << _("Saving for ") << elapsed_text(progress_stage_started_) << _(" · Remaining time is not available.");
+        } else if (stopping) {
+            detail << _("Stopping safely. Keep the drive connected until the operation stops.");
+        } else if (p.stage == "Complete" || p.stage == "Finishing" || p.stage == "Formatting complete") {
+            detail << (progress_test_files_ ? _("Finishing the temporary-file checks. No USB was changed.") :
+                       progress_usb_creation_ ? _("Written data has been checked. Refreshing and releasing the USB before reporting success. Keep it connected.") :
+                       _("Finishing the operation and releasing its files. Please wait for the final result."));
+        } else {
+            const bool byte_stream = p.stage == "Writing" || p.stage == "Verifying" || p.stage == "Checksum" || p.stage == "Backing up" || p.stage == "Scanning" || p.stage == "Checking source" || p.stage == "Preparing test";
+            if (byte_stream && p.total) detail << human_size(p.done) << " / " << human_size(p.total);
+            if (byte_stream && p.bytes_per_second > 0) detail << "  ·  " << human_size(static_cast<uint64_t>(p.bytes_per_second)) << "/s";
+            if (byte_stream && p.bytes_per_second > 0 && p.total > p.done) {
+                const double remaining = static_cast<double>(p.total - p.done) / p.bytes_per_second;
+                if (remaining < 60) detail << _("  ·  Less than a minute left in this step");
+                else detail << _("  ·  About ") << static_cast<uint64_t>(remaining / 60) + 1 << _(" min left in this step");
+            }
+            if (progress_test_files_) detail << _("  ·  No USB is used or changed.");
+            else if (p.stage == "Writing") detail << _("  ·  Keep the USB connected; saving and verification come next.");
+            else if (p.stage == "Verifying") detail << _("  ·  Keep the USB connected until verification finishes.");
+            else if (p.stage == "Preparing") detail << _("Preparing and checking safety. Follow any system authorization prompt.");
+            else if (!byte_stream) detail << _("Linux is preparing the USB. Keep it connected until this step finishes.");
+        }
+        detail << '\n' << _("Still working · Elapsed ") << elapsed_text(progress_started_);
+        gtk_label_set_text(GTK_LABEL(progress_detail_), detail.str().c_str());
+    }
+    void apply_progress(const Progress& progress, bool uses_test_files = false) {
+        if (!alive_ || !busy_) return;
+        const auto now = std::chrono::steady_clock::now();
+        if (progress_started_ == std::chrono::steady_clock::time_point{}) progress_started_ = now;
+        if (progress.stage != progress_current_.stage) progress_stage_started_ = now;
+        progress_current_ = progress; progress_test_files_ = uses_test_files;
+        const auto& stage = progress.stage;
+        std::string title = stage == "Writing" ? _("Writing the image to USB") : stage == "Verifying" ? _("Checking the written USB data") :
+                            stage == "Checksum" ? _("Checking the image file") : stage == "Backing up" ? _("Saving the USB backup") :
+                            stage == "Scanning" ? _("Reading the USB") : stage == "Checking source" ? _("Checking the selected image again") : stage;
+        if (stage == "Synchronizing") title = uses_test_files ? _("Saving test data — still working") : progress_usb_creation_ ? _("Saving to the USB — still working") : _("Saving data — still working");
+        else if (stage == "Complete" || stage == "Finishing" || stage == "Formatting complete") title = _("Finishing — please wait");
+        else if (stage == "Preparing") title = _("Preparing — please wait");
+        else if (uses_test_files && stage == "Writing") title = _("Writing a temporary test file");
+        else if (uses_test_files && stage == "Verifying") title = _("Checking temporary test data");
+        else if (uses_test_files && stage == "Checking source") title = _("Checking the temporary test image");
+        if (cancel_->load()) title = stage == "Synchronizing" ? _("Stopping safely — saving buffered data") : _("Stopping safely — please wait");
+        gtk_label_set_text(GTK_LABEL(progress_title_), title.c_str());
+
+        const double part = progress.total ? std::clamp(static_cast<double>(progress.done) / static_cast<double>(progress.total), 0.0, 1.0) : 0;
+        const bool creation = progress_usb_creation_ || uses_test_files;
+        const bool streaming = stage == "Writing" || stage == "Verifying" || stage == "Checksum" || stage == "Backing up" || stage == "Scanning" || stage == "Checking source" || stage == "Preparing test";
+        progress_indeterminate_ = !streaming || !progress.total || cancel_->load();
+        int step = 0;
+        if (creation) step = stage == "Checking source" ? 1 : stage == "Writing" ? 2 : stage == "Synchronizing" ? 3 : stage == "Verifying" ? 4 : (stage == "Complete" || stage == "Finishing") ? 5 : 0;
+        std::string bar_text = step ? std::string(_("Step ")) + std::to_string(step) + _(" of 5") : _("Working…");
+        // These are workflow milestones, not estimates of wall-clock time.
+        // No active stage can fill the bar or display overall completion.
+        const double fraction = step ? (static_cast<double>(step - 1) + (progress_indeterminate_ ? 0 : part)) / 5 : std::min(part, 0.95);
+        gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(progress_bar_), std::min(fraction, 0.95));
+        gtk_progress_bar_set_text(GTK_PROGRESS_BAR(progress_bar_), bar_text.c_str());
+        gtk_widget_set_visible(progress_spinner_, TRUE); gtk_spinner_start(GTK_SPINNER(progress_spinner_));
+        if (progress_indeterminate_) gtk_progress_bar_pulse(GTK_PROGRESS_BAR(progress_bar_));
+        if (!progress.detail.empty()) technical_result(progress.detail);
+        refresh_progress_detail();
+        if (!progress_timer_) progress_timer_ = g_timeout_add(150, +[](gpointer data) -> gboolean {
+            auto* self = static_cast<Desktop*>(data);
+            if (!self->alive_ || !self->busy_) { self->progress_timer_ = 0; return G_SOURCE_REMOVE; }
+            if (self->progress_indeterminate_) gtk_progress_bar_pulse(GTK_PROGRESS_BAR(self->progress_bar_));
+            self->refresh_progress_detail();
+            return G_SOURCE_CONTINUE;
+        }, this);
+    }
+    void finish_progress(bool success) {
+        if (progress_timer_) { g_source_remove(progress_timer_); progress_timer_ = 0; }
+        progress_indeterminate_ = false;
+        gtk_spinner_stop(GTK_SPINNER(progress_spinner_)); gtk_widget_set_visible(progress_spinner_, FALSE);
+        const double fraction = success ? 1 : std::min(gtk_progress_bar_get_fraction(GTK_PROGRESS_BAR(progress_bar_)), 0.95);
+        // Reset activity mode even if the last determinate fraction is unchanged.
+        gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(progress_bar_), 0);
+        gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(progress_bar_), fraction);
+        gtk_progress_bar_set_text(GTK_PROGRESS_BAR(progress_bar_), success ? _("100% · Complete") : _("Stopped"));
     }
     std::string failure_advice(const std::string& error, bool changes_drive) const {
         std::string lower = error;
@@ -304,38 +405,21 @@ class Desktop : public std::enable_shared_from_this<Desktop> {
     }
     using Work = std::function<std::string(const ProgressFn&, const std::atomic_bool&)>;
     using Failure = std::function<void(const std::string&, const std::string&)>;
-    void work(const char* title, Work task, std::function<void(const std::string&)> success = {}, bool cancellable = true, bool changes_drive = false, Failure failed = {}, bool uses_test_files = false) {
+    void work(const char* title, Work task, std::function<void(const std::string&)> success = {}, bool cancellable = true, bool changes_drive = false, Failure failed = {}, bool uses_test_files = false, bool creates_usb = false) {
         if (busy_) return;
         busy_ = true; can_cancel_ = cancellable; cancel_ = std::make_shared<std::atomic_bool>(false);
-        gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(progress_bar_), 0); technical_result(""); report(title, _("Preparing and checking safety…")); update_controls(); record(title);
+        const auto operation = ++operation_id_;
+        progress_started_ = std::chrono::steady_clock::now(); progress_current_ = {}; progress_usb_creation_ = creates_usb;
+        technical_result(""); apply_progress({"Preparing", 0, 0, 0, {}}, uses_test_files); report(title, _("Preparing and checking safety…")); update_controls(); record(title);
         auto self = shared_from_this(); const auto cancellation = cancel_;
-        try { std::thread([self, task = std::move(task), success = std::move(success), cancellation, changes_drive, failed, uses_test_files] {
-            ProgressFn progress = [self, uses_test_files, last = std::chrono::steady_clock::time_point{}](const Progress& p) mutable {
-                const auto now = std::chrono::steady_clock::now(); if (now - last < std::chrono::milliseconds(120) && p.done != p.total) return; last = now;
-                self->post([self, p, uses_test_files] {
-                    if (!self->alive_ || !self->busy_) return;
-                    if (self->cancel_->load()) return;
-                    const bool streaming = p.stage == "Writing" || p.stage == "Verifying" || p.stage == "Checksum" || p.stage == "Backing up" || p.stage == "Scanning" || p.stage == "Checking source";
-                    std::string stage = p.stage == "Writing" ? _("Writing to USB") : p.stage == "Verifying" ? _("Checking written data") : p.stage == "Checksum" ? _("Checking image file") : p.stage == "Backing up" ? _("Saving backup") : p.stage == "Scanning" ? _("Reading USB") : p.stage == "Checking source" ? _("Checking the selected image again") : p.stage;
-                    if (uses_test_files && p.stage == "Writing") stage = _("Writing a temporary test file");
-                    if (uses_test_files && p.stage == "Verifying") stage = _("Checking temporary test data");
-                    if (uses_test_files && p.stage == "Checking source") stage = _("Checking the temporary test image");
-                    gtk_label_set_text(GTK_LABEL(self->progress_title_), stage.c_str());
-                    const double fraction = p.total ? std::min(1.0, static_cast<double>(p.done) / static_cast<double>(p.total)) : 0;
-                    gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(self->progress_bar_), fraction);
-                    std::ostringstream status; if (p.total) status << static_cast<int>(fraction * 100) << "%";
-                    if (streaming && p.total) status << "  ·  " << human_size(p.done) << " / " << human_size(p.total);
-                    if (p.bytes_per_second > 0) status << "  ·  " << human_size(static_cast<uint64_t>(p.bytes_per_second)) << "/s";
-                    if (streaming && p.bytes_per_second > 0 && p.total > p.done) {
-                        const double remaining = static_cast<double>(p.total - p.done) / p.bytes_per_second;
-                        if (remaining < 60) status << _("  ·  Less than a minute left in this step");
-                        else status << _("  ·  About ") << static_cast<uint64_t>(remaining / 60) + 1 << _(" min left in this step");
-                    }
-                    if (uses_test_files) status << _("  ·  No USB is used or changed.");
-                    else if (p.stage == "Writing") status << _("  ·  Keep the USB connected; checking comes next.");
-                    else if (p.stage == "Verifying") status << _("  ·  Keep the USB connected until checking finishes.");
-                    if (!p.detail.empty()) self->technical_result(p.detail);
-                    gtk_label_set_text(GTK_LABEL(self->progress_detail_), status.str().c_str());
+        try { std::thread([self, task = std::move(task), success = std::move(success), cancellation, changes_drive, failed, uses_test_files, operation] {
+            ProgressFn progress = [self, uses_test_files, operation, last = std::chrono::steady_clock::time_point{}, last_stage = std::string{}](const Progress& p) mutable {
+                const auto now = std::chrono::steady_clock::now();
+                if (p.stage == last_stage && now - last < std::chrono::milliseconds(120) && p.done != p.total) return;
+                last = now; last_stage = p.stage;
+                self->post([self, p, uses_test_files, operation] {
+                    if (!self->alive_ || !self->busy_ || self->operation_id_ != operation) return;
+                    self->apply_progress(p, uses_test_files);
                 });
             };
             std::string result, error, image_advice; std::optional<ImageIssue> image_issue; bool stopped = false;
@@ -343,11 +427,12 @@ class Desktop : public std::enable_shared_from_this<Desktop> {
             catch (const Cancelled& e) { error = changes_drive ? e.what() : _("Operation cancelled. Your source image or drive was left unchanged."); stopped = true; }
             catch (const ImageError& e) { error = e.what(); image_issue = e.issue(); image_advice = e.advice(); }
             catch (const std::exception& e) { error = e.what(); }
-            self->post([self, result, error, image_issue, image_advice, stopped, success, changes_drive, failed] {
-                if (!self->alive_) return;
+            self->post([self, result, error, image_issue, image_advice, stopped, success, changes_drive, failed, operation] {
+                if (!self->alive_ || self->operation_id_ != operation) return;
+                self->finish_progress(error.empty());
                 self->busy_ = false; self->can_cancel_ = false;
                 if (error.empty()) {
-                    gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(self->progress_bar_), 1); self->report(_("Completed"), result); self->record(result);
+                    self->report(_("Completed"), result); self->record(result);
                     try { if (success) success(result); }
                     catch (const std::exception& display_error) { self->report(_("Operation completed; display update failed"), display_error.what(), true); }
                 }
@@ -364,6 +449,7 @@ class Desktop : public std::enable_shared_from_this<Desktop> {
             });
         }).detach(); }
         catch (const std::exception& error) {
+            finish_progress(false);
             busy_ = false; can_cancel_ = false;
             const std::string heading = _("Could not start operation"), advice = _("Try the operation again. Technical details are available below.");
             report(heading, advice, true); technical_result(error.what()); if (failed) failed(heading, advice); update_controls();
@@ -522,12 +608,13 @@ class Desktop : public std::enable_shared_from_this<Desktop> {
                 if (cancel) throw Cancelled();
                 storage.unmount(checked); const auto current = storage.revalidate(checked);
                 std::string hash; { UniqueFd fd(storage.open_device(current, true)); hash = write_image(source, fd.fd, current.size, true, progress, cancel); }
+                progress({"Finishing", 0, 0, 0, "Refreshing the USB after verified data has been synchronized."});
                 storage.rescan(current); return hash;
             }, [this](const std::string& hash) {
                 report(_("Written and verified"), _("Every written byte matches your image. Safely eject the USB in your file manager. To boot from it, restart the computer and choose USB in its boot menu. The key and supported images depend on your computer."));
                 technical_result(_("Written image SHA-256: ") + hash);
                 record(_("USB written and verified. SHA-256: ") + hash);
-            }, true, true);
+            }, true, true, {}, false, true);
         });
     }
     void format_drive() {
@@ -791,10 +878,11 @@ class Desktop : public std::enable_shared_from_this<Desktop> {
             if (adw_overlay_split_view_get_collapsed(ADW_OVERLAY_SPLIT_VIEW(self->split_))) adw_overlay_split_view_set_show_sidebar(ADW_OVERLAY_SPLIT_VIEW(self->split_), FALSE);
         }), this);
         progress_card_ = box(GTK_ORIENTATION_VERTICAL, 10); gtk_widget_add_css_class(progress_card_, "progress-card"); auto* top = box(GTK_ORIENTATION_HORIZONTAL, 12);
+        progress_spinner_ = gtk_spinner_new(); gtk_widget_set_visible(progress_spinner_, FALSE); append(top, progress_spinner_);
         progress_title_ = label(_("Ready"), "progress-title"); gtk_widget_set_hexpand(progress_title_, TRUE); append(top, progress_title_);
         cancel_button_ = button(_("Cancel"), "secondary-button"); click(cancel_button_, [this] {
-            if (busy_ && can_cancel_) { cancel_->store(true); gtk_widget_set_sensitive(cancel_button_, FALSE); report(_("Cancellation requested"), _("Waiting for buffered data to be safely handled…")); }
-        }); append(top, cancel_button_); append(progress_card_, top); progress_bar_ = gtk_progress_bar_new(); append(progress_card_, progress_bar_); progress_detail_ = label("", "status-text"); gtk_label_set_selectable(GTK_LABEL(progress_detail_), TRUE); append(progress_card_, progress_detail_);
+            if (busy_ && can_cancel_) { cancel_->store(true); gtk_widget_set_sensitive(cancel_button_, FALSE); apply_progress(progress_current_, progress_test_files_); }
+        }); append(top, cancel_button_); append(progress_card_, top); progress_bar_ = gtk_progress_bar_new(); gtk_progress_bar_set_show_text(GTK_PROGRESS_BAR(progress_bar_), TRUE); append(progress_card_, progress_bar_); progress_detail_ = label("", "status-text"); gtk_label_set_selectable(GTK_LABEL(progress_detail_), TRUE); append(progress_card_, progress_detail_);
         progress_expander_ = gtk_expander_new(_("Technical details")); progress_technical_ = label("", "technical-text"); gtk_label_set_selectable(GTK_LABEL(progress_technical_), TRUE); gtk_expander_set_child(GTK_EXPANDER(progress_expander_), progress_technical_); append(progress_card_, progress_expander_);
         append(main, progress_card_); gtk_widget_set_visible(progress_card_, FALSE);
         auto* self_test_action = g_simple_action_new("self-test", nullptr);
@@ -805,7 +893,7 @@ class Desktop : public std::enable_shared_from_this<Desktop> {
     }
 public:
     explicit Desktop(AdwApplication* app) : app_(app) { build(); }
-    ~Desktop() { alive_ = false; cancel_->store(true); if (timer_) g_source_remove(timer_); g_clear_object(&device_model_); }
+    ~Desktop() { alive_ = false; cancel_->store(true); if (timer_) g_source_remove(timer_); if (progress_timer_) g_source_remove(progress_timer_); g_clear_object(&device_model_); }
     void start() {
         gtk_window_present(GTK_WINDOW(window_)); refresh_devices(); timer_ = g_timeout_add_seconds(4, +[](gpointer data) -> gboolean {
             auto* self = static_cast<Desktop*>(data);
