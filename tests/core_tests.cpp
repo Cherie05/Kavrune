@@ -30,6 +30,14 @@ template<class Function> void fails(Function&& operation, const std::string& des
     try { operation(); } catch (const Error&) { failed = true; }
     check(failed, description);
 }
+template<class Function> void image_fails(Function&& operation, ImageIssue issue, const std::string& description) {
+    bool failed = false;
+    try { operation(); }
+    catch (const ImageError& error) {
+        failed = error.issue() == issue && !error.advice().empty();
+    }
+    check(failed, description);
+}
 struct Descriptor {
     int fd;
     explicit Descriptor(const std::filesystem::path& path, int flags = O_RDWR) : fd(::open(path.c_str(), flags | O_CLOEXEC)) {
@@ -119,6 +127,58 @@ std::vector<unsigned char> iso_fixture(bool hybrid, bool windows = false, bool b
         catalog[0] = 1; catalog[30] = 0x55; catalog[31] = 0xaa;
         le16(catalog + 28, static_cast<uint16_t>(0U - 1U - 0xaa55U));
         catalog[32] = 0x88; le16(catalog + 38, 4); le32(catalog + 40, 23);
+    }
+    return data;
+}
+
+std::vector<unsigned char> section_boot_iso_fixture(bool hybrid = true, bool windows = false) {
+    auto data = iso_fixture(hybrid, windows, true);
+    auto* catalog = data.data() + 22 * 2048;
+    // No bootable default entry: the boot image appears in a final UEFI section.
+    // This is the layout used by UEFI-only optical boot catalogs.
+    std::fill_n(catalog + 32, 32, 0);
+    catalog[64] = 0x91;
+    catalog[65] = 0xef;
+    le16(catalog + 66, 1);
+    catalog[96] = 0x88;
+    le16(catalog + 102, 4);
+    le32(catalog + 104, 23);
+    return data;
+}
+
+void udf_descriptor(unsigned char* descriptor, const char* identifier) {
+    std::fill_n(descriptor, 2048, 0);
+    std::memcpy(descriptor + 1, identifier, 5);
+    descriptor[6] = 1;
+}
+
+std::vector<unsigned char> udf_bridge_fixture(bool before_iso, bool windows = false) {
+    auto data = iso_fixture(true, windows, true);
+    const auto descriptors = std::vector<unsigned char>(data.begin() + 16 * 2048, data.begin() + 19 * 2048);
+    // Relocate the directory extents before using sectors 19 through 21 for
+    // additional descriptors; the boot catalog and image stay at their LBAs.
+    std::copy_n(data.data() + 20 * 2048, 2048, data.data() + 26 * 2048);
+    auto* pvd = data.data() + 16 * 2048;
+    le32(pvd + 158, 26); be32(pvd + 162, 26);
+    auto* root = data.data() + 26 * 2048;
+    le32(root + 2, 26); be32(root + 6, 26);
+    const size_t parent = root[0];
+    le32(root + parent + 2, 26); be32(root + parent + 6, 26);
+    if (windows) {
+        std::copy_n(data.data() + 21 * 2048, 2048, data.data() + 27 * 2048);
+        const size_t sources = parent + root[parent];
+        le32(root + sources + 2, 27); be32(root + sources + 6, 27);
+    }
+    if (before_iso) {
+        std::copy_n(data.data() + 16 * 2048, 2048, data.data() + 19 * 2048);
+        std::copy_n(descriptors.data() + 2048, 4096, data.data() + 20 * 2048);
+        udf_descriptor(data.data() + 16 * 2048, "BEA01");
+        udf_descriptor(data.data() + 17 * 2048, "NSR03");
+        udf_descriptor(data.data() + 18 * 2048, "TEA01");
+    } else {
+        udf_descriptor(data.data() + 19 * 2048, "BEA01");
+        udf_descriptor(data.data() + 20 * 2048, "NSR02");
+        udf_descriptor(data.data() + 21 * 2048, "TEA01");
     }
     return data;
 }
@@ -214,10 +274,8 @@ void isohybrid_inspection_tests(const Temp& temp) {
            "a raw GPT prefix without a validated ISO cannot use the sector-zero exception");
     reject([](auto& data) { data[22 * 2048 + 32] = 0; },
            "a nonbootable ISO cannot use the sector-zero exception");
-    reject([](auto& data) { data[446] = 0; },
-           "the type-zero hybrid MBR carrier must be active");
-    reject([](auto& data) { data[450] = 0x17; },
-           "a different MBR type cannot enable the GPT sector-zero exception");
+    reject([](auto& data) { data[446] = 0x7f; },
+           "hybrid MBR carriers reject invalid boot flag values");
     reject([](auto& data) { le32(data.data() + 458, 255); },
            "the hybrid MBR carrier must cover the whole image");
     reject([](auto& data) { le32(data.data() + 458, 257); },
@@ -228,8 +286,6 @@ void isohybrid_inspection_tests(const Temp& temp) {
            "a hybrid MBR requires its signature");
     reject([](auto& data) { std::swap_ranges(data.data() + 1024, data.data() + 1152, data.data() + 1152); },
            "only the first GPT entry may be the sector-zero ISO carrier");
-    reject([](auto& data) { data[1024] ^= 1; },
-           "the sector-zero GPT carrier must have the Basic Data type GUID");
     reject([](auto& data) { le64(data.data() + 1024 + 32, 1); },
            "a nonzero GPT start below the usable range remains invalid");
     reject([](auto& data) { le64(data.data() + 1024 + 40, 63); },
@@ -257,6 +313,212 @@ void isohybrid_inspection_tests(const Temp& temp) {
           "recognizing a GPT ISO carrier does not enable raw writing of Windows installers");
 }
 
+void compatibility_tests(const Temp& temp) {
+    const auto file = temp.file("compatibility.iso");
+    const auto inspect = [&](const std::vector<unsigned char>& data) {
+        put(file, data);
+        return inspect_image(file);
+    };
+    auto data = section_boot_iso_fixture();
+    auto image = inspect(data);
+    check(image.kind == "Hybrid ISO" && image.bootable && image.raw_writable,
+          "a UEFI-only final El Torito section is a supported boot catalog");
+    for (const uint16_t count : {0, 1}) {
+        data = section_boot_iso_fixture();
+        le16(data.data() + 22 * 2048 + 102, count);
+        image = inspect(data);
+        check(image.bootable && image.raw_writable,
+              "UEFI section entries with zero or one load sector use the EFI whole-image convention");
+        data = iso_fixture(true, false, true);
+        auto* validation = data.data() + 22 * 2048;
+        validation[1] = 0xef;
+        le16(validation + 28, 0);
+        uint16_t sum = 0;
+        for (size_t i = 0; i < 32; i += 2)
+            sum = static_cast<uint16_t>(sum + static_cast<uint16_t>(validation[i] | (validation[i + 1] << 8)));
+        le16(validation + 28, static_cast<uint16_t>(0U - sum));
+        le16(validation + 38, count);
+        image = inspect(data);
+        check(image.bootable && image.raw_writable,
+              "UEFI default entries with zero or one load sector use the EFI whole-image convention");
+    }
+    data = section_boot_iso_fixture();
+    // An earlier BIOS section with no boot image must not hide a later UEFI one.
+    auto* catalog = data.data() + 22 * 2048;
+    std::fill_n(catalog + 64, 128, 0);
+    catalog[64] = 0x90;
+    le16(catalog + 66, 1);
+    catalog[128] = 0x91; catalog[129] = 0xef;
+    le16(catalog + 130, 1);
+    catalog[160] = 0x88; le16(catalog + 166, 4); le32(catalog + 168, 23);
+    image = inspect(data);
+    check(image.bootable && image.raw_writable,
+          "a UEFI boot image after an unbootable BIOS section is discovered");
+    catalog[96] = 0x88; le16(catalog + 102, 4); le32(catalog + 104, 23);
+    image = inspect(data);
+    check(image.bootable && image.raw_writable,
+          "a catalog with BIOS and UEFI boot sections is supported");
+    le32(catalog + 168, 32);
+    put(file, data);
+    fails([&] { inspect_image(file); },
+          "an earlier valid BIOS boot entry does not bypass validation of a later invalid UEFI entry");
+    data = section_boot_iso_fixture();
+    data[22 * 2048 + 96] = 0;
+    check(!inspect(data).bootable, "a section with no bootable entry is not reported bootable");
+    const auto reject_catalog = [&](const std::function<void(unsigned char*)>& modify,
+                                    const std::string& description) {
+        auto broken = section_boot_iso_fixture();
+        modify(broken.data() + 22 * 2048);
+        put(file, broken);
+        fails([&] { inspect_image(file); }, description);
+    };
+    reject_catalog([](auto* p) { p[96] = 0x89; }, "invalid section boot indicators are rejected");
+    reject_catalog([](auto* p) { le32(p + 104, 32); }, "out-of-image UEFI boot extents are rejected");
+    reject_catalog([](auto* p) { le16(p + 66, UINT16_MAX); }, "oversized El Torito section lists are rejected");
+    reject_catalog([](auto* p) { p[64] = 0x92; }, "invalid El Torito section header indicators are rejected");
+    reject_catalog([](auto* p) { p[28] ^= 1; }, "UEFI-only catalog validation checksums are enforced");
+    for (const size_t extensions : {1, 2}) {
+        data = section_boot_iso_fixture();
+        auto* entries = data.data() + 22 * 2048;
+        std::fill_n(entries + 64, 256, 0);
+        entries[64] = 0x90;
+        le16(entries + 66, 1);
+        entries[96] = 0x88; entries[97] = 0x20;
+        le16(entries + 102, 4); le32(entries + 104, 23);
+        for (size_t i = 0; i < extensions; ++i) {
+            entries[128 + 32 * i] = 0x44;
+            entries[129 + 32 * i] = i + 1 < extensions ? 0x20 : 0;
+        }
+        auto* final_section = entries + 128 + 32 * extensions;
+        final_section[0] = 0x91; final_section[1] = 0xef;
+        le16(final_section + 2, 1);
+        final_section[32] = 0x88;
+        le16(final_section + 38, 4); le32(final_section + 40, 23);
+        image = inspect(data);
+        check(image.bootable && image.raw_writable,
+              extensions == 1 ? "El Torito section counts exclude a boot entry's extension record before the next section" :
+                                "El Torito chained extension records do not consume the section boot-entry count");
+    }
+    reject_catalog([](auto* p) { p[97] = 0x20; },
+                   "a section boot entry that promises an absent extension is rejected");
+    reject_catalog([](auto* p) { p[96] = 0x44; },
+                   "an orphan extension cannot take the place of a section boot entry");
+    reject_catalog([](auto* p) { p[97] = 0x20; p[128] = 0x44; p[129] = 0x20; },
+                   "a catalog extension that promises a missing continuation is rejected");
+    data = iso_fixture(true, false, true);
+    le16(data.data() + 22 * 2048 + 38, 0);
+    put(file, data);
+    fails([&] { inspect_image(file); }, "BIOS boot entries still require a nonzero load-sector count");
+    data = iso_fixture(true, false, true);
+    data[450] = 0;
+    image = inspect(data);
+    check(image.bootable && image.raw_writable && image.kind == "Hybrid ISO",
+          "a bootable ISO with an active full-image type-zero MBR carrier works without GPT");
+    for (const unsigned char type : {0x17, 0x83, 0xef}) {
+        data = gpt_isohybrid_fixture();
+        data[450] = type;
+        image = inspect(data);
+        check(image.bootable && image.raw_writable,
+              "a nonzero full-image MBR carrier type supports the hybrid GPT sector-zero convention");
+    }
+    for (bool gpt : {false, true}) {
+        data = gpt ? gpt_isohybrid_fixture() : iso_fixture(true, false, true);
+        data[450] = 0;
+        le32(data.data() + 458, 1);
+        image = inspect(data);
+        check(image.bootable && image.raw_writable == gpt,
+              gpt ? "a type-zero one-sector dummy MBR supports a validated bootable GPT ISO" :
+                    "a type-zero one-sector dummy alone does not claim a usable USB disk layout");
+    }
+    data = gpt_isohybrid_fixture();
+    constexpr std::array<unsigned char, 16> efi_system_guid{
+        0x28, 0x73, 0x2a, 0xc1, 0x1f, 0xf8, 0xd2, 0x11,
+        0xba, 0x4b, 0x00, 0xa0, 0xc9, 0x3e, 0xc9, 0x3b};
+    std::copy(efi_system_guid.begin(), efi_system_guid.end(), data.data() + 1024);
+    refresh_isohybrid_gpt(data);
+    image = inspect(data);
+    check(image.bootable && image.raw_writable,
+          "an EFI System GPT carrier at sector zero is recognized for a validated bootable hybrid ISO");
+    data = gpt_isohybrid_fixture();
+    for (size_t i = 0; i < 16; ++i) data[1024 + i] = static_cast<unsigned char>(i + 1);
+    refresh_isohybrid_gpt(data);
+    image = inspect(data);
+    check(image.bootable && image.raw_writable,
+          "a generator-selected nonzero GPT type GUID is supported for the validated ISO carrier");
+    data = gpt_isohybrid_fixture();
+    std::copy_n(data.data() + 1024, 256, data.data() + 1024 + 256);
+    std::fill_n(data.data() + 1024, 256, 0);
+    refresh_isohybrid_gpt(data);
+    image = inspect(data);
+    check(image.bootable && image.raw_writable,
+          "unused GPT entry slots before the first populated ISO carrier are supported");
+    data = iso_fixture(true, false, true);
+    std::swap_ranges(data.data() + 16 * 2048, data.data() + 17 * 2048, data.data() + 17 * 2048);
+    image = inspect(data);
+    check(image.bootable && image.raw_writable,
+          "an El Torito descriptor before the primary volume descriptor is supported");
+    data = iso_fixture(true, false, true);
+    std::copy_n(data.data() + 18 * 2048, 2048, data.data() + 19 * 2048);
+    std::copy_n(data.data() + 17 * 2048, 2048, data.data() + 18 * 2048);
+    auto* enhanced = data.data() + 17 * 2048;
+    std::fill_n(enhanced, 2048, 0);
+    enhanced[0] = 2; std::memcpy(enhanced + 1, "CD001", 5); enhanced[6] = 2;
+    image = inspect(data);
+    check(image.bootable && image.raw_writable,
+          "an ISO type-two enhanced volume descriptor may use version two");
+    enhanced[6] = 9;
+    put(file, data);
+    fails([&] { inspect_image(file); }, "unknown ISO descriptor versions are rejected");
+    data = iso_fixture(true, false, true);
+    std::copy_n(data.data() + 18 * 2048, 2048, data.data() + 19 * 2048);
+    image = inspect(data);
+    check(image.bootable && image.raw_writable,
+          "multiple consecutive volume descriptor terminators are valid ISO metadata");
+    std::copy_n(data.data() + 16 * 2048, 2048, data.data() + 19 * 2048);
+    put(file, data);
+    image_fails([&] { inspect_image(file); }, ImageIssue::malformed,
+                "ordinary ISO descriptors after a terminator remain invalid");
+    for (bool before : {false, true}) {
+        image = inspect(udf_bridge_fixture(before));
+        check(image.kind == "Hybrid ISO" && image.bootable && image.raw_writable,
+              before ? "a complete UDF recognition sequence before ISO descriptors is supported" :
+                       "a complete UDF recognition sequence after ISO descriptors is supported");
+        image = inspect(udf_bridge_fixture(before, true));
+        check(image.kind == "Windows installation ISO" && !image.raw_writable,
+              before ? "UDF descriptors before ISO do not bypass Windows installer gating" :
+                       "UDF descriptors after ISO do not bypass Windows installer gating");
+    }
+    data = udf_bridge_fixture(true);
+    std::copy_n(data.data() + 22 * 2048, 2048, data.data() + 28 * 2048);
+    std::copy_backward(data.data() + 17 * 2048, data.data() + 22 * 2048, data.data() + 23 * 2048);
+    udf_descriptor(data.data() + 17 * 2048, "BOOT2");
+    le32(data.data() + 21 * 2048 + 71, 28);
+    image = inspect(data);
+    check(image.bootable && image.raw_writable,
+          "a UDF recognition sequence permits an intervening BOOT2 descriptor");
+    image = inspect(section_boot_iso_fixture(true, true));
+    check(image.kind == "Windows installation ISO" && image.bootable && !image.raw_writable,
+          "a UEFI-only Windows installer remains blocked for raw USB writing");
+    image = inspect(section_boot_iso_fixture(false));
+    check(image.kind == "Optical ISO" && image.bootable && !image.raw_writable,
+          "a UEFI optical-only boot catalog does not claim raw USB compatibility without a disk layout");
+    data = gpt_isohybrid_fixture();
+    std::copy_n(section_boot_iso_fixture().data() + 22 * 2048, 2048, data.data() + 22 * 2048);
+    image = inspect(data);
+    check(image.raw_writable && image.bootable,
+          "UEFI-only section catalogs enable a validated hybrid GPT carrier");
+    const auto disguised = temp.file("truncated.raw");
+    data = iso_fixture(true, false, true);
+    data.resize(data.size() - 2048);
+    put(disguised, data);
+    fails([&] { inspect_image(disguised); }, "raw extensions do not bypass a truncated recognized ISO");
+    data = iso_fixture(true, false, true);
+    le32(data.data() + 16 * 2048 + 158, UINT32_MAX);
+    be32(data.data() + 16 * 2048 + 162, UINT32_MAX);
+    put(disguised, data);
+    fails([&] { inspect_image(disguised); }, "raw extensions do not bypass invalid ISO directory bounds");
+}
+
 void inspection_tests(const Temp& temp) {
     const auto empty = temp.file("empty.img"); put(empty, {});
     fails([&] { inspect_image(empty); }, "empty image must fail");
@@ -267,6 +529,7 @@ void inspection_tests(const Temp& temp) {
     check(raw.raw_writable && !raw.bootable && raw.size == 333 && raw.kind == "Opaque raw disk image", "raw image description");
     const auto link = temp.file("link.img"); std::filesystem::create_symlink(opaque, link);
     fails([&] { inspect_image(link); }, "symlink image must fail");
+    fails([&] { identify_file(link); }, "checksum-only identity also refuses symbolic links");
     const auto fifo = temp.file("fifo.img"); check(::mkfifo(fifo.c_str(), 0600) == 0, "fixture fifo creation");
     fails([&] { inspect_image(fifo); }, "fifo must fail without waiting");
     const auto invalid_iso = temp.file("invalid.iso"); put(invalid_iso, pattern(333));
@@ -303,9 +566,45 @@ void inspection_tests(const Temp& temp) {
     fails([&] { inspect_image(gpt); }, "GPT header CRC invalid rejected");
     broken = gpt_fixture(); broken[1024] ^= 1; put(gpt, broken);
     fails([&] { inspect_image(gpt); }, "GPT entry CRC invalid rejected");
-    auto udf = std::vector<unsigned char>(20 * 2048); std::memcpy(udf.data() + 16 * 2048 + 1, "BEA01", 5);
+    auto udf = std::vector<unsigned char>(20 * 2048);
+    udf_descriptor(udf.data() + 16 * 2048, "BEA01");
+    udf_descriptor(udf.data() + 17 * 2048, "NSR03");
+    udf_descriptor(udf.data() + 18 * 2048, "TEA01");
     const auto udf_path = temp.file("udf.iso"); put(udf_path, udf);
     check(!inspect_image(udf_path).raw_writable, "UDF content recognized but write gated");
+    std::fill_n(udf.data() + 18 * 2048, 2048, 0);
+    put(udf_path, udf);
+    image_fails([&] { inspect_image(udf_path); }, ImageIssue::malformed,
+                "incomplete UDF recognition sequences receive an actionable malformed-image result");
+    for (const std::string suffix : {".iso.crdownload", ".iso.part", ".iso.partial", ".iso.download"}) {
+        const auto partial = temp.file("unfinished" + suffix);
+        put(partial, iso_fixture(true, false, true));
+        image_fails([&] { inspect_image(partial); }, ImageIssue::incomplete,
+                    "browser and downloader temporary suffixes receive an actionable incomplete-download result");
+    }
+    put(compressed, pattern(44));
+    image_fails([&] { inspect_image(compressed); }, ImageIssue::compressed,
+                "compressed image formats receive a decompression action");
+    put(corrupt, {'Q', 'F', 'I', 0xfb});
+    image_fails([&] { inspect_image(corrupt); }, ImageIssue::container,
+                "virtual disk containers receive a raw-conversion action");
+    put(invalid_iso, pattern(333));
+    image_fails([&] { inspect_image(invalid_iso); }, ImageIssue::unrecognized,
+                "unrecognized content receives a specific image-selection action");
+    broken = iso_fixture(true); broken[16 * 2048 + 84] ^= 1;
+    put(corrupt, broken);
+    image_fails([&] { inspect_image(corrupt); }, ImageIssue::malformed,
+                "malformed ISO metadata receives a specific download-validation action");
+    auto large_directory = iso_fixture(true);
+    large_directory.resize(9 * 1024 * 1024);
+    auto* large_pvd = large_directory.data() + 16 * 2048;
+    le32(large_pvd + 80, static_cast<uint32_t>(large_directory.size() / 2048));
+    be32(large_pvd + 84, static_cast<uint32_t>(large_directory.size() / 2048));
+    le32(large_pvd + 166, 8 * 1024 * 1024 + 2048);
+    be32(large_pvd + 170, 8 * 1024 * 1024 + 2048);
+    put(corrupt, large_directory);
+    image_fails([&] { inspect_image(corrupt); }, ImageIssue::inspection_limit,
+                "oversized metadata receives an inspection-limit result instead of a corruption claim");
 }
 
 void checksum_tests(const Temp& temp) {
@@ -315,6 +614,14 @@ void checksum_tests(const Temp& temp) {
     check(checksum(file, "SHA-512", {}, cancel) == "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f", "SHA-512 reference vector");
     check(checksum(file, "MD5", {}, cancel) == "900150983cd24fb0d6963f7d28e17f72", "MD5 comparison vector");
     check(checksum(file, "SHA-1", {}, cancel) == "a9993e364706816aba3e25717850c26c9cd0d89d", "SHA-1 comparison vector");
+    const auto unknown = temp.file("checksum-only.txt"); put(unknown, {'a', 'b', 'c'});
+    const auto identity = identify_file(unknown);
+    check(identity.path == unknown && identity.name == "checksum-only.txt" && identity.size == 3 && identity.inode != 0,
+          "checksum-only selection records the identity of unrecognized file contents");
+    check(!identity.raw_writable && !identity.bootable && identity.kind.empty(),
+          "identifying a checksum-only file cannot grant USB writing or claim recognized boot structures");
+    check(checksum(unknown, "SHA-256", {}, cancel) == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+          "an unrecognized file can still be checked against its publisher's checksum");
     fails([&] { checksum(file, "CRC32", {}, cancel); }, "unsupported algorithm fails");
     cancel = true;
     fails([&] { checksum(file, "SHA-256", {}, cancel); }, "pre-cancelled checksum fails");
@@ -543,6 +850,7 @@ int main() {
         Temp temp;
         inspection_tests(temp);
         isohybrid_inspection_tests(temp);
+        compatibility_tests(temp);
         checksum_tests(temp);
         writing_tests(temp);
         backup_and_scan_tests(temp);

@@ -24,6 +24,8 @@ For your first physical trial, use a spare USB with no important files. Download
 
 Read the [beginner guide](docs/GETTING_STARTED.md) for each step and [feature status](docs/FEATURE_STATUS.md) for what is working and what remains to qualify.
 
+See [image compatibility](docs/IMAGE_COMPATIBILITY.md) for supported BIOS/UEFI hybrid profiles and help with refused files. **Check download** can compare complete unsupported files with a publisher's checksum while USB creation stays blocked for those files.
+
 ## Available features
 
 | Operation | Behavior |

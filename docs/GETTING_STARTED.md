@@ -56,4 +56,12 @@ Readback verification cannot promise boot compatibility. To check that, restart 
 
 If no USB is offered, check that it is connected and click **Refresh**. Open **Activity** to read why a drive is protected or unsupported. If authentication or the storage service is unavailable, use a normal Linux desktop session with UDisks2 and a password prompt agent. From a source checkout, rebuild with `./scripts/build.sh` after changes, then launch again.
 
+## If your image is not accepted
+
+Read the app's next step: finish an incomplete download, extract an archive, convert a virtual disk, or use the publisher's USB preparation method. Windows, optical-only ISO and UDF-only images can be checked, but this version cannot create a bootable USB from them. Do not rename a file to bypass these checks.
+
+To diagnose a completed download, open **Check download**, choose the file there, and compare it with the publisher's SHA-256. This also works for complete files whose format or structure the USB creator cannot accept. A **Checksum only** selection keeps creation disabled. A matching hash does not add USB support or prove the image will boot; if it matches but is still refused, follow the publisher's preparation instructions. Unfinished `.part` and similar downloads remain blocked. See the [compatibility guide](IMAGE_COMPATIBILITY.md) for message meanings and supported profiles.
+
+After an app update or source rebuild, close Kavrune completely and reopen it so the new image checks are loaded.
+
 See [what is implemented and pending](FEATURE_STATUS.md), [recorded checks](BUILD_RESULTS.md), and the [production validation requirements](VALIDATION.md).

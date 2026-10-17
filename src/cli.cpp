@@ -45,6 +45,17 @@ std::string json(const std::string& value) {
     }
     return out.str() + '"';
 }
+const char* image_issue_name(af::ImageIssue issue) {
+    switch (issue) {
+    case af::ImageIssue::incomplete: return "incomplete";
+    case af::ImageIssue::compressed: return "compressed";
+    case af::ImageIssue::container: return "container";
+    case af::ImageIssue::malformed: return "malformed";
+    case af::ImageIssue::unrecognized: return "unrecognized";
+    case af::ImageIssue::inspection_limit: return "inspection_limit";
+    }
+    return "unrecognized";
+}
 void report(const af::Progress& p) {
     std::cerr << '\r' << p.stage << "  " << af::human_size(p.done) << " / " << af::human_size(p.total);
     if (p.total) std::cerr << "  " << int(100.0 * double(p.done) / double(p.total)) << '%';
@@ -131,7 +142,14 @@ int main(int argc, char** argv) {
         if (command == "inspect") {
             if (argc < 3) throw af::Error("Specify an image file.");
             auto opts = options(argc, argv, 3, {"--json"});
-            auto image = af::inspect_image(argv[2]);
+            af::Image image;
+            try { image = af::inspect_image(argv[2]); }
+            catch (const af::ImageError& error) {
+                if (!opts.count("--json")) throw;
+                std::cout << "{\"error\":" << json(error.what()) << ",\"issue\":" << json(image_issue_name(error.issue()))
+                          << ",\"advice\":" << json(error.advice()) << "}\n";
+                return 1;
+            }
             if (opts.count("--json")) std::cout << "{\"name\":" << json(image.name) << ",\"size\":" << image.size
                 << ",\"kind\":" << json(image.kind) << ",\"description\":" << json(image.description)
                 << ",\"bootable\":" << (image.bootable ? "true" : "false") << ",\"raw_writable\":" << (image.raw_writable ? "true" : "false") << "}\n";
@@ -244,5 +262,6 @@ int main(int argc, char** argv) {
         catch (const std::exception& e) { std::cerr << "Operation completed; event log unavailable: " << e.what() << '\n'; }
         return 0;
     } catch (const af::Cancelled& e) { std::cerr << '\n' << e.what() << '\n'; return 130; }
+      catch (const af::ImageError& e) { std::cerr << "\nKavrune: " << e.advice() << "\nDetails: " << e.what() << '\n'; return 1; }
       catch (const std::exception& e) { std::cerr << "\nKavrune: " << e.what() << '\n'; return 1; }
 }

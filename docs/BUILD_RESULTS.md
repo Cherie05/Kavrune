@@ -1,4 +1,4 @@
-# Local validation — 14 October 2026
+# Local validation — 14–17 October 2026
 
 Build host: Ubuntu 26.04.1 LTS x86_64, GCC 15.2, GTK 4.22.4, libadwaita 1.9.1, GLib/GIO 2.88.0, OpenSSL 3.5.5. Build dependencies were extracted under `.deps`; no system package installation or physical-device writing occurred.
 
@@ -65,8 +65,24 @@ A physical-trial preparation exposed an image-inspection bug before any drive wr
 
 The image-inspection fix does not establish a physical USB, Alpine boot, Polkit or firmware qualification result. No physical USB was written during this investigation. Existing app processes must be closed and reopened to load the rebuilt binary.
 
+## Broader image compatibility — 17 October 2026
+
+The inspector was extended across the [documented image profiles](IMAGE_COMPATIBILITY.md), with bounds and write restrictions retained. The final local validation recorded:
+
+- Core regression suite: **194 checks passed**; storage regression suite: **122 checks passed**; total: **316 checks**.
+- All five standard CTest checks passed in 1.03 seconds. All five AddressSanitizer/UndefinedBehaviorSanitizer CTest checks passed in 2.69 seconds.
+- Regression fixtures cover BIOS/UEFI default and section catalogs, EFI zero/one-sector load conventions, section-entry extensions, alternate MBR/GPT carrier types, unused GPT slots, enhanced ISO descriptors, repeated ISO terminators, ISO/UDF bridges and retained malformed-image/Windows restrictions. Independent code review identified and corrected repeated-terminator and boot-entry-extension handling.
+- CLI JSON success and typed issue outputs were checked. Core identity, checksum and write-permission tests cover the logic used by checksum-only selections. Interactive chooser behavior and the complete fallback UX were **not automated or visually verified** for this update.
+- The rebuilt desktop startup smoke test exited successfully with no standard-error output. This checks startup, not interactive image selection or USB operations.
+- The completed Alpine Extended ISO above was recognized and copied into a new temporary regular file. Its full 1,456,766,976 bytes passed mandatory SHA-256 readback verification against `a22115a46a1bcd876234a6cd43797fe19f4acfc4512fb41ea64e16cc2ffb4d90`, also matched to the official publisher checksum as recorded above.
+- `android-x86-6.0-r1.iso`, 566,231,040 bytes, was recognized and passed a full temporary-file write and SHA-256 readback comparison. An official publisher checksum was **not fetched** for that file; this result establishes copy equality, not download authenticity.
+- Both temporary image copies were deleted. No physical drives were accessed or written by these simulations.
+- `scripts/package.sh` rebuilt the Debian package and direct dependency inventory after all five tests passed. Extraction without installation confirmed matching executable build IDs, no setuid or RPATH/RUNPATH entries, current guides and notices, recognition of both exact ISOs, and a passing CLI safe self-test with `physical_usb_tested: false`.
+
+These results establish structural recognition and file-copy verification for those exact files, plus the extracted package checks described above. They do not establish physical USB reliability, successful Alpine/Android-x86 installation or booting, UEFI/Secure Boot qualification, or general support for every ISO. Windows extraction, UDF-only/optical-only USB creation and compressed-image streaming remain unimplemented.
+
 ## Published revision CI
 
-[GitHub Actions run 38540398428](https://github.com/Cherie05/Kavrune/actions/runs/38540398428) completed successfully for commit `29b3875073378c28a4ff0c6421b825f066e0fe7c`, created on 14 October 2026 at 14:40 IST. This is evidence for that published revision. The subsequent beginner UI, safe self-test and storage-protection changes require their own CI run after publication; the earlier green run does not validate those changes.
+[GitHub Actions run 38540398428](https://github.com/Cherie05/Kavrune/actions/runs/38540398428) completed successfully for commit `29b3875073378c28a4ff0c6421b825f066e0fe7c`, created on 14 October 2026 at 14:40 IST. This is evidence for that published revision. Subsequent beginner UI, safe self-test, storage-protection and image-compatibility changes require their own CI run after publication; the earlier green run does not validate those changes.
 
 Reproduce release/file tests with `scripts/build.sh`, optional synthetic boot with `scripts/test-boot.sh build/kavrune-cli`, and packaging with `scripts/package.sh`. For a sanitizer build, configure a separate build directory with `-DKAVRUNE_SANITIZERS=ON`. Refer to `VALIDATION.md` for the outstanding release gates.
