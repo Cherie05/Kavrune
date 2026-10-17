@@ -9,6 +9,16 @@
 
 namespace kavrune {
 class Error : public std::runtime_error { public: using std::runtime_error::runtime_error; };
+enum class ImageIssue { incomplete, compressed, container, malformed, unrecognized, inspection_limit };
+class ImageError : public Error {
+    ImageIssue issue_;
+    std::string advice_;
+public:
+    ImageError(ImageIssue issue, const std::string& detail, const std::string& advice)
+        : Error(detail), issue_(issue), advice_(advice) {}
+    ImageIssue issue() const noexcept { return issue_; }
+    const std::string& advice() const noexcept { return advice_; }
+};
 class Cancelled : public Error {
 public:
     Cancelled() : Error("Operation cancelled. The drive may contain incomplete media; recreate it before use.") {}
@@ -45,6 +55,8 @@ struct SelfTestResult {
     std::string sha256;
 };
 Image inspect_image(const std::string& path);
+// File identity only; this does not establish a format or write compatibility.
+Image identify_file(const std::string& path);
 std::string checksum(const std::string& path, const std::string& algorithm, const ProgressFn& progress, const std::atomic_bool& cancel);
 std::string write_image(const Image& image, int target_fd, uint64_t capacity, bool verify, const ProgressFn& progress, const std::atomic_bool& cancel);
 std::string backup_image(int source_fd, uint64_t capacity, const std::string& destination, const ProgressFn& progress, const std::atomic_bool& cancel);

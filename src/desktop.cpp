@@ -46,6 +46,17 @@ GtkWidget* button(const char* text, const char* css = nullptr) {
     return w;
 }
 std::string base_name(const std::string& path) { const auto at = path.find_last_of('/'); return at == std::string::npos ? path : path.substr(at + 1); }
+const char* image_issue_heading(ImageIssue issue) {
+    switch (issue) {
+    case ImageIssue::incomplete: return _("Download not finished");
+    case ImageIssue::compressed: return _("Extract this download first");
+    case ImageIssue::container: return _("Convert this disk image first");
+    case ImageIssue::malformed: return _("Check this download");
+    case ImageIssue::unrecognized: return _("Choose a disk image");
+    case ImageIssue::inspection_limit: return _("Image needs another creation method");
+    }
+    return _("Check this image");
+}
 bool same_source(const Image& first, const Image& second) {
     return first.inode == second.inode && first.device == second.device && first.size == second.size &&
         first.mtime_sec == second.mtime_sec && first.mtime_nsec == second.mtime_nsec &&
@@ -76,7 +87,7 @@ class Desktop : public std::enable_shared_from_this<Desktop> {
     std::vector<GtkWidget*> controls_, dropdowns_, device_details_, device_technical_, device_empty_, device_rows_;
     std::vector<Device> devices_;
     Image image_;
-    std::string digest_, digest_algorithm_ = "sha256";
+    std::string digest_, digest_algorithm_ = "sha256", source_issue_hint_;
     std::string device_report_;
     bool log_warning_shown_ = false;
     bool checksum_failed_ = false;
@@ -171,14 +182,14 @@ class Desktop : public std::enable_shared_from_this<Desktop> {
         gtk_widget_set_sensitive(check_, !busy_ && !image_.path.empty()); gtk_widget_set_sensitive(cancel_button_, busy_ && can_cancel_);
         gtk_widget_set_visible(cancel_button_, busy_);
         if (!image_.path.empty()) {
-            gtk_label_set_text(GTK_LABEL(image_status_), checksum_failed_ ? _("Checksum mismatch — blocked") : image_.raw_writable ? (image_.bootable ? _("Ready to write") : _("Check image source")) : _("Unsupported image"));
+            gtk_label_set_text(GTK_LABEL(image_status_), checksum_failed_ ? _("Checksum mismatch — blocked") : image_.raw_writable ? (image_.bootable ? _("Ready to write") : _("Check image source")) : image_.kind == "Checksum-only file" ? _("Checksum only") : _("Different creation method needed"));
             gtk_widget_remove_css_class(image_status_, "success"); gtk_widget_remove_css_class(image_status_, "warning");
             gtk_widget_add_css_class(image_status_, !checksum_failed_ && image_.raw_writable && image_.bootable ? "success" : "warning");
         }
         std::string hint;
         if (busy_) hint = _("Wait for the current operation to finish, or cancel it.");
-        else if (image_.path.empty()) hint = _("Next: choose your operating system image in step 1.");
-        else if (!image_.raw_writable) hint = _("This image cannot be written to a USB by this version. Choose a USB-ready Linux image or disk backup.");
+        else if (image_.path.empty()) hint = source_issue_hint_.empty() ? _("Next: choose your operating system image in step 1.") : source_issue_hint_;
+        else if (!image_.raw_writable) hint = image_.kind == "Checksum-only file" ? _("This file can be checked, but cannot create a USB. Choose a complete USB-ready system image in step 1.") : _("This image needs a different USB creation method. See the explanation in step 1. You can still check its checksum.");
         else if (checksum_failed_) hint = _("The checksum did not match. Choose the image again or compare it with the correct publisher checksum before continuing.");
         else if (devices_.empty()) hint = _("Next: insert a USB drive. Then select it in step 2.");
         else if (!target) hint = _("Next: select your USB in step 2.");
@@ -270,7 +281,8 @@ class Desktop : public std::enable_shared_from_this<Desktop> {
         catch (const std::exception& error) { refreshing_ = false; record(std::string(_("Could not start drive discovery: ")) + error.what()); }
     }
     using Work = std::function<std::string(const ProgressFn&, const std::atomic_bool&)>;
-    void work(const char* title, Work task, std::function<void(const std::string&)> success = {}, bool cancellable = true, bool changes_drive = false, Fn failed = {}, bool uses_test_files = false) {
+    using Failure = std::function<void(const std::string&, const std::string&)>;
+    void work(const char* title, Work task, std::function<void(const std::string&)> success = {}, bool cancellable = true, bool changes_drive = false, Failure failed = {}, bool uses_test_files = false) {
         if (busy_) return;
         busy_ = true; can_cancel_ = cancellable; cancel_ = std::make_shared<std::atomic_bool>(false);
         gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(progress_bar_), 0); technical_result(""); report(title, _("Preparing and checking safety…")); update_controls(); record(title);
@@ -304,11 +316,12 @@ class Desktop : public std::enable_shared_from_this<Desktop> {
                     gtk_label_set_text(GTK_LABEL(self->progress_detail_), status.str().c_str());
                 });
             };
-            std::string result, error; bool stopped = false;
+            std::string result, error, image_advice; std::optional<ImageIssue> image_issue; bool stopped = false;
             try { result = task(progress, *cancellation); }
             catch (const Cancelled& e) { error = changes_drive ? e.what() : _("Operation cancelled. Your source image or drive was left unchanged."); stopped = true; }
+            catch (const ImageError& e) { error = e.what(); image_issue = e.issue(); image_advice = e.advice(); }
             catch (const std::exception& e) { error = e.what(); }
-            self->post([self, result, error, stopped, success, changes_drive, failed] {
+            self->post([self, result, error, image_issue, image_advice, stopped, success, changes_drive, failed] {
                 if (!self->alive_) return;
                 self->busy_ = false; self->can_cancel_ = false;
                 if (error.empty()) {
@@ -317,37 +330,45 @@ class Desktop : public std::enable_shared_from_this<Desktop> {
                     catch (const std::exception& display_error) { self->report(_("Operation completed; display update failed"), display_error.what(), true); }
                 }
                 else {
-                    self->report(stopped ? _("Cancelled") : _("Could not finish"), stopped ? error : self->failure_advice(error, changes_drive), !stopped);
-                    self->technical_result(error); self->record(std::string(stopped ? "Cancelled: " : "Failed: ") + error);
-                    if (failed) failed();
+                    const bool image_guidance = image_issue.has_value() && !changes_drive;
+                    const std::string heading = stopped ? _("Cancelled") : image_guidance ? image_issue_heading(*image_issue) : _("Could not finish");
+                    const std::string advice = stopped ? error : image_guidance ? image_advice : self->failure_advice(error, changes_drive);
+                    self->report(heading, advice, !stopped && !image_guidance);
+                    self->technical_result(error); self->record(std::string(stopped ? "Cancelled: " : image_guidance ? "Image guidance: " : "Failed: ") + error);
+                    if (failed) failed(heading, advice);
                 }
                 self->update_controls(); self->refresh_devices();
                 if (self->close_after_) { self->alive_ = false; gtk_window_destroy(GTK_WINDOW(self->window_)); }
             });
         }).detach(); }
         catch (const std::exception& error) {
-            busy_ = false; can_cancel_ = false; report(_("Could not start operation"), _("Try the operation again. Technical details are available below."), true); technical_result(error.what()); if (failed) failed(); update_controls();
+            busy_ = false; can_cancel_ = false;
+            const std::string heading = _("Could not start operation"), advice = _("Try the operation again. Technical details are available below.");
+            report(heading, advice, true); technical_result(error.what()); if (failed) failed(heading, advice); update_controls();
         }
     }
-    void choose_image() {
+    void choose_image(bool checksum_only = false) {
         if (busy_) return;
-        auto* dialog = gtk_file_dialog_new(); gtk_file_dialog_set_title(dialog, _("Choose a disk image"));
+        auto* dialog = gtk_file_dialog_new(); gtk_file_dialog_set_title(dialog, checksum_only ? _("Choose a download to check") : _("Choose a disk image"));
         auto* filters = g_list_store_new(GTK_TYPE_FILE_FILTER); auto* filter = gtk_file_filter_new(); gtk_file_filter_set_name(filter, _("Disk images (ISO, IMG, RAW)"));
-        for (const char* suffix : {"*.iso", "*.ISO", "*.img", "*.raw"}) gtk_file_filter_add_pattern(filter, suffix);
-        g_list_store_append(filters, filter); g_object_unref(filter); filter = gtk_file_filter_new(); gtk_file_filter_set_name(filter, _("All files")); gtk_file_filter_add_pattern(filter, "*"); g_list_store_append(filters, filter); g_object_unref(filter);
-        gtk_file_dialog_set_filters(dialog, G_LIST_MODEL(filters)); g_object_unref(filters);
+        for (const char* suffix : {"*.iso", "*.ISO", "*.img", "*.IMG", "*.raw", "*.RAW"}) gtk_file_filter_add_pattern(filter, suffix);
+        g_list_store_append(filters, filter); g_object_unref(filter); filter = gtk_file_filter_new(); gtk_file_filter_set_name(filter, _("All files")); gtk_file_filter_add_pattern(filter, "*"); g_list_store_append(filters, filter);
+        gtk_file_dialog_set_filters(dialog, G_LIST_MODEL(filters));
+        if (checksum_only) gtk_file_dialog_set_default_filter(dialog, filter);
+        g_object_unref(filter); g_object_unref(filters);
+        struct ImageChoice { std::shared_ptr<Desktop> desktop; bool checksum_only; };
         gtk_file_dialog_open(dialog, GTK_WINDOW(window_), nullptr, +[](GObject* source, GAsyncResult* result, gpointer data) {
-            auto self = *static_cast<std::shared_ptr<Desktop>*>(data); delete static_cast<std::shared_ptr<Desktop>*>(data); GError* error = nullptr;
+            std::unique_ptr<ImageChoice> choice(static_cast<ImageChoice*>(data)); auto self = choice->desktop; GError* error = nullptr;
             GFile* file = gtk_file_dialog_open_finish(GTK_FILE_DIALOG(source), result, &error);
             if (!self->alive_) { g_clear_object(&file); g_clear_error(&error); return; }
             if (!file) { if (error && !g_error_matches(error, GTK_DIALOG_ERROR, GTK_DIALOG_ERROR_DISMISSED)) self->message(_("Could not open image"), error->message); g_clear_error(&error); return; }
             char* path = g_file_get_path(file); g_object_unref(file);
             if (!path) { self->message(_("Local file required"), _("Download this image to a local folder first.")); return; }
-            std::string chosen(path); g_free(path); self->inspect(chosen);
-        }, new std::shared_ptr<Desktop>(shared_from_this())); g_object_unref(dialog);
+            std::string chosen(path); g_free(path); self->inspect(chosen, choice->checksum_only);
+        }, new ImageChoice{shared_from_this(), checksum_only}); g_object_unref(dialog);
     }
     void reset_source(const char* reason) {
-        image_ = {}; digest_.clear(); checksum_failed_ = false;
+        image_ = {}; digest_.clear(); source_issue_hint_.clear(); checksum_failed_ = false;
         gtk_editable_set_text(GTK_EDITABLE(expected_), "");
         gtk_drop_down_set_selected(GTK_DROP_DOWN(algorithm_), 0);
         gtk_label_set_text(GTK_LABEL(source_name_), _("No image selected")); gtk_label_set_text(GTK_LABEL(source_size_), "");
@@ -357,7 +378,17 @@ class Desktop : public std::enable_shared_from_this<Desktop> {
         gtk_label_set_text(GTK_LABEL(image_hash_), _("No checksum available")); gtk_label_set_text(GTK_LABEL(check_name_), _("No image selected"));
         gtk_label_set_text(GTK_LABEL(check_result_), _("Choose an image to calculate its checksum."));
     }
-    void inspect(const std::string& path) {
+    void source_issue(const std::string& path, const std::string& heading, const std::string& advice) {
+        reset_source(advice.c_str());
+        source_issue_hint_ = advice;
+        gtk_label_set_text(GTK_LABEL(source_name_), base_name(path).c_str());
+        gtk_label_set_text(GTK_LABEL(image_status_), heading.c_str());
+        gtk_widget_add_css_class(image_status_, "warning");
+        gtk_label_set_text(GTK_LABEL(source_technical_), path.c_str());
+        gtk_label_set_text(GTK_LABEL(check_name_), base_name(path).c_str());
+        gtk_label_set_text(GTK_LABEL(check_result_), advice.c_str());
+    }
+    void inspect(const std::string& path, bool checksum_only = false) {
         if (busy_) return;
         reset_source(_("Checking the file before use…")); update_controls(); gtk_label_set_text(GTK_LABEL(source_name_), base_name(path).c_str());
         gtk_label_set_text(GTK_LABEL(image_status_), _("Checking image…"));
@@ -365,10 +396,16 @@ class Desktop : public std::enable_shared_from_this<Desktop> {
         gtk_label_set_text(GTK_LABEL(check_result_), _("Calculating SHA-256…"));
         gtk_label_set_text(GTK_LABEL(source_description_), _("Inspecting image contents…")); gtk_label_set_text(GTK_LABEL(image_hash_), _("Calculating SHA-256…"));
         auto inspected = std::make_shared<Image>(); auto digest = std::make_shared<std::string>();
-        work(_("Inspecting source image"), [path, inspected, digest](const ProgressFn& progress, const std::atomic_bool& cancel) {
-            *inspected = inspect_image(path);
+        work(checksum_only ? _("Checking downloaded file") : _("Inspecting source image"), [path, inspected, digest, checksum_only](const ProgressFn& progress, const std::atomic_bool& cancel) {
+            try { *inspected = inspect_image(path); }
+            catch (const ImageError& error) {
+                if (!checksum_only || error.issue() == ImageIssue::incomplete) throw;
+                *inspected = identify_file(path);
+                inspected->kind = "Checksum-only file"; inspected->description = error.advice();
+                inspected->raw_writable = false;
+            }
             *digest = checksum(path, "sha256", progress, cancel);
-            const auto checked = inspect_image(path);
+            const auto checked = identify_file(path);
             if (!same_source(*inspected, checked))
                 throw Error(_("The image changed while it was being checked. Choose it again."));
             inspected->expected_sha256 = *digest;
@@ -378,20 +415,21 @@ class Desktop : public std::enable_shared_from_this<Desktop> {
             gtk_label_set_text(GTK_LABEL(source_name_), image_.name.c_str());
             std::string explanation;
             if (image_.kind.find("Windows") != std::string::npos) explanation = _("Windows installers need a different USB creation method. Windows support is not available in this version.");
-            else if (!image_.raw_writable) explanation = _("This file is designed for an optical disc and cannot be directly written to a bootable USB by this version.");
+            else if (image_.kind == "Checksum-only file") explanation = image_.description + " " + _("This file is available for checksum checks only. Choose a complete USB-ready image to create a USB.");
+            else if (!image_.raw_writable) explanation = image_.description + " " + _("You can still use Check download to compare its checksum with the publisher's.");
             else if (!image_.bootable) explanation = _("This disk image can be copied, but Kavrune could not confirm boot information. Use a trusted image intended for USB drives.");
             else explanation = _("This image can be written to a USB. Its existing boot information will be kept.");
             gtk_label_set_text(GTK_LABEL(source_description_), explanation.c_str());
             gtk_label_set_text(GTK_LABEL(source_size_), human_size(image_.size).c_str());
-            gtk_label_set_text(GTK_LABEL(image_status_), image_.raw_writable ? (image_.bootable ? _("Ready to write") : _("Check image source")) : _("Unsupported image"));
+            gtk_label_set_text(GTK_LABEL(image_status_), image_.raw_writable ? (image_.bootable ? _("Ready to write") : _("Check image source")) : image_.kind == "Checksum-only file" ? _("Checksum only") : _("Different creation method needed"));
             gtk_widget_add_css_class(image_status_, image_.raw_writable && image_.bootable ? "success" : "warning");
             gtk_label_set_text(GTK_LABEL(source_technical_), (image_.kind + "\n" + image_.description + "\n" + image_.path).c_str());
             gtk_label_set_text(GTK_LABEL(check_name_), (image_.name + "\n" + human_size(image_.size)).c_str()); gtk_label_set_text(GTK_LABEL(image_hash_), digest_.c_str());
             gtk_label_set_text(GTK_LABEL(check_result_), digest_.c_str());
-            report(image_.raw_writable ? _("Image checked") : _("Choose another image"), explanation);
+            report(image_.kind == "Checksum-only file" ? _("File ready for checksum comparison") : _("Image checked"), explanation);
             technical_result(image_.description);
             update_controls();
-        }, true, false, [this] { reset_source(_("The file was not fully checked. Choose it again to continue.")); });
+        }, true, false, [this, path](const std::string& heading, const std::string& advice) { source_issue(path, heading, advice); });
     }
     void calculate_checksum() {
         if (image_.path.empty()) return;
@@ -404,18 +442,18 @@ class Desktop : public std::enable_shared_from_this<Desktop> {
             message(_("Check the expected checksum"), _("Paste only the hexadecimal checksum for the selected algorithm.")); return;
         }
         work(_("Calculating image checksum"), [source, algo](const ProgressFn& progress, const std::atomic_bool& cancel) {
-                if (!same_source(source, inspect_image(source.path))) throw Error(_("The image changed after selection. Choose it again."));
+                if (!same_source(source, identify_file(source.path))) throw Error(_("The file changed after selection. Choose it again."));
                 const auto result = checksum(source.path, algo, progress, cancel);
-                if (!same_source(source, inspect_image(source.path))) throw Error(_("The image changed while checking. Choose it again."));
+                if (!same_source(source, identify_file(source.path))) throw Error(_("The file changed while checking. Choose it again."));
                 return result;
             },
             [this, expected, algo](const std::string& result) {
                 digest_ = result; digest_algorithm_ = algo; gtk_label_set_text(GTK_LABEL(check_result_), result.c_str());
                 if (expected.empty()) report(_("Checksum calculated"), _("Compare this checksum with one published by the image publisher."));
-                else if (expected == result) { checksum_failed_ = false; report(_("Checksum matches"), _("The image matches the publisher's checksum. You can continue creating your USB.")); record(_("Expected checksum matched.")); }
+                else if (expected == result) { checksum_failed_ = false; report(_("Checksum matches"), image_.raw_writable ? _("The image matches the publisher's checksum. You can continue creating your USB.") : image_.kind == "Checksum-only file" ? _("The file matches the publisher's checksum. Checksum verification does not make this file suitable for creating a USB.") : _("The file matches the publisher's checksum. It still needs the creation method explained in step 1.")); record(_("Expected checksum matched.")); }
                 else { checksum_failed_ = true; report(_("Checksum does not match"), _("Creating a USB is blocked. Check that you pasted the correct checksum, or download the image again and choose it again."), true); record(_("Expected checksum did not match.")); }
                 update_controls();
-            }, true, false, [this] { reset_source(_("The image could not be checked. Choose it again before continuing.")); });
+            }, true, false, [this, source](const std::string& heading, const std::string& advice) { source_issue(source.path, heading, advice); });
     }
     void confirm_device(const char* action, const Device& device, bool destructive, const std::string& plan, Fn execute) {
         std::string details = device.display_name() + "\n" + identity_text(device) + "\n\n" + plan;
@@ -586,7 +624,7 @@ class Desktop : public std::enable_shared_from_this<Desktop> {
         auto* v = page("check"); append(v, hero(_("CHECK YOUR DOWNLOAD"), _("Is your image file complete?"), _("A checksum is a file's fingerprint. Compare it with the one on the publisher's website to check your download.")));
         GtkWidget* contents; append(v, card("01", _("Select your image"), _("Checksums validate file integrity. Use a trusted publisher's checksum."), &contents));
         auto* row = box(GTK_ORIENTATION_HORIZONTAL, 16); check_name_ = label(_("No image selected"), "file-name"); gtk_widget_set_hexpand(check_name_, TRUE); append(row, check_name_);
-        auto* choose = control(button(_("Choose image…"), "secondary-button")); click(choose, [this] { choose_image(); }); append(row, choose); append(contents, row);
+        auto* choose = control(button(_("Choose image…"), "secondary-button")); click(choose, [this] { choose_image(true); }); append(row, choose); append(contents, row);
         append(v, card("02", _("Compare a checksum"), _("Expected value is optional. Paste the hexadecimal value only."), &contents));
         const char* algorithms[] = {"SHA-256", "SHA-512", nullptr}; algorithm_ = control(gtk_drop_down_new_from_strings(algorithms)); append(contents, algorithm_);
         expected_ = control(gtk_entry_new()); gtk_entry_set_placeholder_text(GTK_ENTRY(expected_), _("Expected checksum from the publisher")); gtk_entry_set_max_length(GTK_ENTRY(expected_), 256); gtk_widget_set_tooltip_text(expected_, _("Expected hexadecimal checksum")); append(contents, expected_);

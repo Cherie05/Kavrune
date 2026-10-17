@@ -274,42 +274,30 @@ std::string upper(std::string text) {
     return text;
 }
 
-bool valid_mbr(const std::vector<unsigned char>& head, uint64_t size) {
-    if (head.size() < 512 || head[510] != 0x55 || head[511] != 0xaa) return false;
-    bool has_partition = false;
+struct MbrLayout { bool valid = false, disk = false, protective = false; };
+MbrLayout inspect_mbr(const std::vector<unsigned char>& head, uint64_t size, bool bootable_iso) {
+    if (head.size() < 512 || head[510] != 0x55 || head[511] != 0xaa) return {};
+    MbrLayout result;
     for (size_t i = 0; i < 4; ++i) {
         const auto* p = head.data() + 446 + 16 * i;
         const uint32_t start = le32(p + 8), length = le32(p + 12);
-        if (p[4] == 0 && start == 0 && length == 0) continue;
-        if ((p[0] != 0 && p[0] != 0x80) || p[4] == 0 || length == 0) return false;
+        if (p[4] == 0 && start == 0 && length == 0 && p[0] == 0) continue;
+        if ((p[0] != 0 && p[0] != 0x80) || length == 0) return {};
+        if (p[4] == 0) {
+            // Hybrid generators use type-zero entries for the whole ISO, or a
+            // one-sector boot flag placeholder. The placeholder alone is not a
+            // usable disk layout. Neither convention applies to raw images.
+            if (!bootable_iso || start != 0 || (length != 1 && length != size / 512) || size % 512 != 0) return {};
+            result.valid = true;
+            result.disk = result.disk || (length == size / 512 && length > 1);
+            continue;
+        }
         const uint64_t end = static_cast<uint64_t>(start) + length;
         // Protective MBRs saturate at 2 TiB. They are only accepted with a valid GPT below.
-        if (p[4] != 0xee && end > size / 512) return false;
-        has_partition = true;
+        if (p[4] != 0xee && end > size / 512) return {};
+        result.valid = true; result.disk = true; result.protective = result.protective || p[4] == 0xee;
     }
-    return has_partition;
-}
-
-bool protective_mbr(const std::vector<unsigned char>& head) {
-    if (head.size() < 512) return false;
-    for (size_t i = 0; i < 4; ++i) if (head[446 + 16 * i + 4] == 0xee) return true;
-    return false;
-}
-
-bool isohybrid_mbr(const std::vector<unsigned char>& head, uint64_t size) {
-    if (head.size() < 512 || head[510] != 0x55 || head[511] != 0xaa || size % 512 != 0) return false;
-    const auto* carrier = head.data() + 446;
-    // Some ISO generators map the whole image with an active, type-zero MBR
-    // entry. Recognize that convention only alongside a validated bootable ISO.
-    if (carrier[0] != 0x80 || carrier[4] != 0 || le32(carrier + 8) != 0 || le32(carrier + 12) != size / 512) return false;
-    for (size_t i = 1; i < 4; ++i) {
-        const auto* entry = head.data() + 446 + 16 * i;
-        const uint32_t start = le32(entry + 8), length = le32(entry + 12);
-        if (entry[4] == 0 && start == 0 && length == 0 && entry[0] == 0) continue;
-        if ((entry[0] != 0 && entry[0] != 0x80) || entry[4] == 0 || entry[4] == 0xee || length == 0 ||
-            static_cast<uint64_t>(start) + length > size / 512) return false;
-    }
-    return true;
+    return result;
 }
 
 bool valid_gpt(int fd, const std::vector<unsigned char>& head, uint64_t size, bool hybrid_iso) {
@@ -337,18 +325,16 @@ bool valid_gpt(int fd, const std::vector<unsigned char>& head, uint64_t size, bo
     std::vector<unsigned char> entries(static_cast<size_t>(bytes));
     read_exact(fd, entries.data(), entries.size(), entries_lba * 512);
     if (crc32(entries.data(), entries.size()) != le32(h + 88)) throw Error("The GPT partition list checksum is invalid.");
+    bool populated_entry_seen = false;
     for (uint32_t i = 0; i < entries_count; ++i) {
         const auto* entry = entries.data() + static_cast<size_t>(i) * entry_size;
         if (std::all_of(entry, entry + 16, [](unsigned char c) { return c == 0; })) continue;
         const uint64_t begin = le64(entry + 32), end = le64(entry + 40);
-        // ISOHybrid's first Basic Data partition intentionally includes sector
-        // zero and the GPT itself. This is a compatibility convention, not a
-        // general relaxation of GPT bounds for raw disk images.
-        constexpr std::array<unsigned char, 16> basic_data = {
-            0xa2, 0xa0, 0xd0, 0xeb, 0xe5, 0xb9, 0x33, 0x44,
-            0x87, 0xc0, 0x68, 0xb6, 0xb7, 0x26, 0x99, 0xc7};
-        const bool iso_carrier = hybrid_iso && i == 0 && begin == 0 && end >= first &&
-            std::equal(basic_data.begin(), basic_data.end(), entry);
+        // Hybrid generators allow configurable type GUIDs for the ISO carrier.
+        // Only its first populated partition can include sector zero and GPT
+        // metadata; raw disk images retain their strict usable-range checks.
+        const bool iso_carrier = hybrid_iso && !populated_entry_seen && begin == 0 && end >= first;
+        populated_entry_seen = true;
         if (begin > end || end >= sectors)
             throw Error("A GPT partition extends beyond the image or has reversed bounds.");
         if ((!iso_carrier && begin < first) || end > last)
@@ -361,8 +347,11 @@ struct IsoEntry { std::string name; uint32_t extent = 0, size = 0; bool director
 
 std::vector<IsoEntry> iso_directory(int fd, uint64_t image_size, uint32_t extent, uint32_t bytes) {
     const uint64_t offset = static_cast<uint64_t>(extent) * sector_size;
-    if (bytes == 0 || bytes > chunk_size || offset > image_size || bytes > image_size - offset)
-        throw Error("An ISO directory is invalid or exceeds the inspection limit.");
+    if (bytes == 0 || offset > image_size || bytes > image_size - offset)
+        throw Error("An ISO directory extends outside the image or is empty.");
+    if (bytes > chunk_size)
+        throw ImageError(ImageIssue::inspection_limit, "An ISO directory exceeds the bounded inspection limit.",
+                         "This image has more directory metadata than this version can inspect. Use the image publisher's USB preparation instructions.");
     std::vector<unsigned char> data(bytes);
     read_exact(fd, data.data(), data.size(), offset);
     std::vector<IsoEntry> entries;
@@ -409,19 +398,62 @@ bool el_torito(int fd, uint64_t size, const unsigned char* descriptor) {
     if (std::memcmp(descriptor + 7, "EL TORITO SPECIFICATION", 22) != 0) return false;
     const uint64_t offset = static_cast<uint64_t>(le32(descriptor + 71)) * sector_size;
     if (offset > size || 64 > size - offset) throw Error("The El Torito boot catalog lies outside the image.");
-    std::array<unsigned char, 64> catalog {};
-    read_exact(fd, catalog.data(), catalog.size(), offset);
+    constexpr uint64_t record_bytes = 32, maximum_records = 4096;
+    auto record_at = [&](uint64_t index) {
+        if (index >= maximum_records)
+            throw ImageError(ImageIssue::inspection_limit, "The El Torito catalog exceeds the bounded inspection limit.",
+                             "This image has more boot entries than this version can inspect. Use the image publisher's USB preparation instructions.");
+        const uint64_t position = offset + index * record_bytes;
+        if (position > size || record_bytes > size - position) throw Error("The El Torito boot catalog is truncated.");
+        std::array<unsigned char, record_bytes> record {};
+        read_exact(fd, record.data(), record.size(), position);
+        return record;
+    };
+    const auto validation = record_at(0);
     uint16_t sum = 0;
-    for (size_t i = 0; i < 32; i += 2) sum = static_cast<uint16_t>(sum + le16(catalog.data() + i));
-    if (catalog[0] != 1 || catalog[30] != 0x55 || catalog[31] != 0xaa || sum != 0)
+    for (size_t i = 0; i < 32; i += 2) sum = static_cast<uint16_t>(sum + le16(validation.data() + i));
+    if (validation[0] != 1 || validation[30] != 0x55 || validation[31] != 0xaa || sum != 0)
         throw Error("The El Torito boot catalog validation entry is invalid.");
-    if (catalog[32] != 0 && catalog[32] != 0x88) throw Error("The El Torito boot entry is invalid.");
-    if (catalog[32] != 0x88) return false;
-    const uint64_t boot_offset = static_cast<uint64_t>(le32(catalog.data() + 40)) * sector_size;
-    const uint64_t boot_bytes = static_cast<uint64_t>(le16(catalog.data() + 38)) * 512;
-    if (catalog[33] > 4 || boot_bytes == 0 || boot_offset >= size || boot_bytes > size - boot_offset)
-        throw Error("The El Torito boot image lies outside the image.");
-    return true;
+    auto boot_entry = [&](const auto& entry, unsigned char platform) {
+        if (entry[0] != 0 && entry[0] != 0x88) throw Error("The El Torito boot entry is invalid.");
+        if (entry[0] == 0) return false;
+        const uint64_t boot_offset = static_cast<uint64_t>(le32(entry.data() + 8)) * sector_size;
+        const uint64_t boot_bytes = static_cast<uint64_t>(le16(entry.data() + 6)) * 512;
+        // UEFI permits zero or one sector to mean the image continues to the
+        // end of the medium (UEFI 2.11, section 13.3.2.1).
+        const bool efi_remainder = platform == 0xef && boot_bytes <= 512;
+        if ((entry[1] & 0x0f) > 4 || boot_offset >= size ||
+            (!efi_remainder && (boot_bytes == 0 || boot_bytes > size - boot_offset)))
+            throw Error("The El Torito boot image lies outside the image.");
+        return true;
+    };
+    bool bootable = boot_entry(record_at(1), validation[1]);
+    uint64_t index = 2;
+    for (;;) {
+        // Catalogs without sections end after their default entry and padding.
+        if (offset + (index + 1) * record_bytes > size) return bootable;
+        const auto header = record_at(index++);
+        if (header[0] == 0) return bootable;
+        if (header[0] != 0x90 && header[0] != 0x91) throw Error("The El Torito section header is invalid.");
+        const uint16_t count = le16(header.data() + 2);
+        if (count == 0) throw Error("The El Torito boot section is empty.");
+        if (count > maximum_records - index)
+            throw ImageError(ImageIssue::inspection_limit, "The El Torito section exceeds the bounded inspection limit.",
+                             "This image has more boot entries than this version can inspect. Use the image publisher's USB preparation instructions.");
+        for (uint16_t i = 0; i < count; ++i) {
+            const auto entry = record_at(index++);
+            bootable = boot_entry(entry, header[1]) || bootable;
+            // Section counts describe boot entries; their extension records
+            // follow each entry and do not consume that count.
+            bool more_extensions = (entry[1] & 0x20) != 0;
+            while (more_extensions) {
+                const auto extension = record_at(index++);
+                if (extension[0] != 0x44) throw Error("An El Torito boot entry extension is missing or invalid.");
+                more_extensions = (extension[1] & 0x20) != 0;
+            }
+        }
+        if (header[0] == 0x91) return bootable;
+    }
 }
 
 std::mutex log_mutex;
@@ -458,10 +490,19 @@ Fd secure_state_directory() {
 }
 }
 
+Image identify_file(const std::string& path) {
+    Fd source = open_source(path);
+    return identity_for(path, file_stat(source.get()));
+}
+
 Image inspect_image(const std::string& path) {
+    const auto extension = upper(std::filesystem::path(path).extension().string());
+    if (extension == ".CRDOWNLOAD" || extension == ".PART" || extension == ".PARTIAL" || extension == ".DOWNLOAD")
+        throw ImageError(ImageIssue::incomplete, "The selected file has an unfinished-download suffix.",
+                         "Wait for your browser to finish downloading, then choose the completed ISO or disk image. Keep the original filename.");
     Fd source = open_source(path);
     Image image = identity_for(path, file_stat(source.get()));
-    const auto extension = upper(std::filesystem::path(path).extension().string());
+    try {
     const size_t head_size = static_cast<size_t>(std::min<uint64_t>(image.size, 64 * sector_size));
     std::vector<unsigned char> head(head_size);
     read_exact(source.get(), head.data(), head.size(), 0);
@@ -469,30 +510,60 @@ Image inspect_image(const std::string& path) {
         return head.size() >= count && std::memcmp(head.data(), signature, count) == 0;
     };
     if (starts("\x1f\x8b", 2) || starts("\xfd" "7zXZ\0", 6) || starts("\x28\xb5\x2f\xfd", 4) ||
-        starts("BZh", 3) || starts("PK\x03\x04", 4) || extension == ".GZ" || extension == ".XZ" || extension == ".ZST" || extension == ".BZ2" || extension == ".ZIP")
-        throw Error("Compressed images are not supported yet. Decompress the image to a regular ISO, IMG, or RAW file first.");
-    if (starts("QFI\xfb", 4) || starts("vhdxfile", 8)) throw Error("Virtual disk containers are not raw images. Convert this image to raw format first.");
+        starts("BZh", 3) || starts("PK\x03\x04", 4) || starts("7z\xbc\xaf\x27\x1c", 6) ||
+        starts("\x04\x22\x4d\x18", 4) || extension == ".GZ" || extension == ".XZ" || extension == ".ZST" || extension == ".BZ2" || extension == ".ZIP" || extension == ".7Z" || extension == ".LZ4")
+        throw ImageError(ImageIssue::compressed, "The selected file is compressed or archived.",
+                         "Extract this download first, then choose the ISO, IMG or RAW file inside it. This version does not write compressed images directly.");
+    if (starts("QFI\xfb", 4) || starts("vhdxfile", 8) || starts("KDMV", 4) || extension == ".VDI")
+        throw ImageError(ImageIssue::container, "The selected file is a virtual disk container.",
+                         "Convert the virtual disk to a raw disk image with a trusted conversion tool, then choose that image.");
     if (image.size >= 512) {
         std::array<unsigned char, 8> footer {};
         read_exact(source.get(), footer.data(), footer.size(), image.size - 512);
-        if (std::memcmp(footer.data(), "conectix", 8) == 0) throw Error("VHD containers are not supported. Convert this image to raw format first.");
+        if (std::memcmp(footer.data(), "conectix", 8) == 0)
+            throw ImageError(ImageIssue::container, "The selected file is a VHD virtual disk container.",
+                             "Convert the virtual disk to a raw disk image with a trusted conversion tool, then choose that image.");
     }
     std::array<unsigned char, sector_size> pvd {};
     bool iso = false, udf = false, boot = false, terminated = false;
-    for (uint64_t sector = 16; sector < 64 && sector * sector_size + sector_size <= image.size; ++sector) {
-        const auto* descriptor = head.data() + sector * sector_size;
-        if (std::memcmp(descriptor + 1, "BEA01", 5) == 0 || std::memcmp(descriptor + 1, "NSR02", 5) == 0 || std::memcmp(descriptor + 1, "NSR03", 5) == 0) udf = true;
-        if (std::memcmp(descriptor + 1, "CD001", 5) != 0) {
-            if (iso) throw Error("The ISO volume descriptor sequence is malformed.");
-            if (!udf) break;
-            continue;
+    unsigned udf_state = 0;
+    constexpr uint64_t maximum_descriptors = 256;
+    uint64_t descriptor_count = 0;
+    for (uint64_t sector = 16; sector * sector_size + sector_size <= image.size; ++sector) {
+        if (descriptor_count++ == maximum_descriptors)
+            throw ImageError(ImageIssue::inspection_limit, "The image has too many volume descriptors for bounded inspection.",
+                             "This image uses more metadata than this version can inspect. Use the publisher's USB preparation instructions.");
+        std::array<unsigned char, sector_size> block {};
+        read_exact(source.get(), block.data(), block.size(), sector * sector_size);
+        const auto* descriptor = block.data();
+        const auto identifier = [&](const char* value) { return std::memcmp(descriptor + 1, value, 5) == 0; };
+        if (identifier("BEA01")) {
+            if (udf_state != 0) throw Error("The UDF volume recognition sequence is malformed.");
+            udf_state = 1; continue;
         }
-        if (descriptor[6] != 1) throw Error("The ISO volume descriptor version is invalid.");
+        if (identifier("NSR02") || identifier("NSR03")) {
+            if (udf_state != 1) throw Error("The UDF volume recognition sequence is malformed.");
+            udf_state = 2; continue;
+        }
+        if (identifier("TEA01")) {
+            if (udf_state != 2) throw Error("The UDF volume recognition sequence is malformed.");
+            udf_state = 3; udf = true; continue;
+        }
+        if (identifier("BOOT2") && (udf_state == 1 || udf_state == 2)) continue;
+        if (std::memcmp(descriptor + 1, "CD001", 5) != 0) {
+            if ((iso && !terminated) || udf_state == 1 || udf_state == 2)
+                throw Error("The image volume descriptor sequence is incomplete or malformed.");
+            break;
+        }
+        if (terminated && descriptor[0] != 255) throw Error("ISO descriptors occur after their sequence terminator.");
+        if (descriptor[6] != 1 && !(descriptor[0] == 2 && descriptor[6] == 2))
+            throw Error("The ISO volume descriptor version is invalid.");
         if (descriptor[0] == 1) { std::copy(descriptor, descriptor + sector_size, pvd.begin()); iso = true; }
         else if (descriptor[0] == 0) boot = el_torito(source.get(), image.size, descriptor) || boot;
-        else if (descriptor[0] == 255) { terminated = true; break; }
+        else if (descriptor[0] == 255) terminated = true;
         else if (descriptor[0] != 2 && descriptor[0] != 3) throw Error("The ISO volume descriptor type is invalid.");
     }
+    if (udf_state == 1 || udf_state == 2) throw Error("The UDF volume recognition sequence is incomplete.");
     bool windows = false;
     if (iso) {
         const uint32_t volume_sectors = le32(pvd.data() + 80);
@@ -502,19 +573,19 @@ Image inspect_image(const std::string& path) {
             throw Error("The ISO filesystem size or volume descriptor is invalid.");
         windows = windows_iso(source.get(), static_cast<uint64_t>(volume_sectors) * sector_size, pvd.data());
     }
-    const bool mbr = valid_mbr(head, image.size);
-    const bool gpt = valid_gpt(source.get(), head, image.size, iso && boot && isohybrid_mbr(head, image.size));
-    const bool disk_layout = gpt || (mbr && !protective_mbr(head));
+    const auto mbr = inspect_mbr(head, image.size, iso && boot);
+    const bool gpt = valid_gpt(source.get(), head, image.size, iso && boot && mbr.valid);
+    const bool disk_layout = gpt || (mbr.valid && mbr.disk && !mbr.protective);
     if (iso) {
         image.kind = windows ? "Windows installation ISO" : (disk_layout ? "Hybrid ISO" : "Optical ISO");
         image.bootable = boot;
         image.raw_writable = disk_layout && !windows;
-        image.description = windows ? "Windows installation media requires file extraction and WIM handling; this release does not create Windows USBs." :
-            (disk_layout ? "ISO with a disk partition layout. Raw writing preserves the image's existing boot files and partitioning; firmware compatibility depends on the image." :
-                "Optical ISO without a disk partition layout. Raw USB writing is disabled because boot compatibility cannot be established.");
+        image.description = windows ? "This Windows installer needs file extraction and large-file handling, which this version does not provide. You can check its checksum here. Use a supported Windows USB creation method." :
+            (disk_layout ? "This ISO has a USB disk layout. Kavrune can copy it and verify the written data. Boot compatibility depends on the image and computer." :
+                "This disc ISO has no USB disk layout. You can check its checksum here. Choose a USB-ready image or follow the publisher's USB preparation instructions.");
     } else if (udf) {
         image.kind = "UDF optical image";
-        image.description = "UDF optical media requires a supported extraction workflow; raw USB creation is disabled in this release.";
+        image.description = "This image uses the UDF disc format. You can check its checksum here. Creating a bootable USB needs an extraction method that this version does not provide.";
     } else if (gpt || disk_layout) {
         image.kind = gpt ? "GPT disk image" : "MBR disk image";
         image.raw_writable = true;
@@ -524,10 +595,17 @@ Image inspect_image(const std::string& path) {
         image.raw_writable = true;
         image.description = "Unstructured raw image. Its bytes can be restored, but no boot structures or operating system were identified.";
     } else {
-        throw Error("No supported image structure was found. Select a valid ISO or an explicit IMG/RAW disk image.");
+        throw ImageError(ImageIssue::unrecognized, "No supported image structure was found in this file.",
+                         "Choose the completed ISO, IMG or RAW download itself. Check its publisher's checksum if the file should be a disk image; some disc formats need the publisher's own USB preparation method.");
     }
     validate_source(image, source.get());
     return image;
+    } catch (const ImageError&) {
+        throw;
+    } catch (const Error& error) {
+        throw ImageError(ImageIssue::malformed, error.what(),
+                         "This image could not be validated. Check the publisher's checksum and that the download finished. Choose the file again after checking it; no USB has been changed.");
+    }
 }
 
 std::string checksum(const std::string& path, const std::string& algorithm, const ProgressFn& progress, const std::atomic_bool& cancel) {

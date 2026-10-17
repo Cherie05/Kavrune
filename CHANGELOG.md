@@ -3,6 +3,8 @@
 ## 0.1.0 — Unreleased development preview
 
 - Recognize bootable hybrid ISOs with a sector-zero GPT carrier, including Alpine Extended, while retaining GPT checksums, image bounds and strict ordinary disk-image validation.
+- Broaden hybrid image inspection to BIOS/UEFI-only boot catalog sections, EFI zero/one-sector load conventions, generator-selected MBR/GPT carrier types, enhanced ISO descriptors and ISO/UDF bridges.
+- Explain unfinished, compressed, virtual-disk, malformed and unsupported images with specific next steps; allow complete unsupported files in Check download without granting USB-write permission. Document the [compatibility profiles](docs/IMAGE_COMPATIBILITY.md) and inspection limits.
 - Adopt Kavrune as the project, desktop application, CLI and package name.
 - Provide an original C++20 GTK4/libadwaita desktop and shared CLI engine.
 - Organize the desktop into seven plain-language tasks with numbered creation steps, clear drive selection, progress and an in-app beginner guide.
