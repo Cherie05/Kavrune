@@ -54,6 +54,17 @@ The revised code was built and checked on 14 October 2026:
 
 These results validate the tested file-based engine, protection logic, desktop workflow and extracted-package contents. GUI file-chooser, checksum-mismatch and invalid-file automation was not confirmed; those user interactions still need manual validation. No package was installed system-wide and no actual drive was written. Real USB operations and the release gates in [VALIDATION.md](VALIDATION.md) remain pending.
 
+## Alpine hybrid ISO compatibility — 17 October 2026
+
+A physical-trial preparation exposed an image-inspection bug before any drive writing: Alpine's first GPT carrier begins at sector zero, preceding the GPT usable range while remaining inside the file. The inspector now recognizes this bounded hybrid convention after validating ISO/boot structures and the whole-image MBR carrier. Ordinary GPT checks remain strict.
+
+- The user's completed Alpine Extended 3.24.2 x86_64 ISO is 1,456,766,976 bytes. SHA-256 matches both its downloaded sidecar and the checksum fetched from Alpine's official HTTPS mirror: `a22115a46a1bcd876234a6cd43797fe19f4acfc4512fb41ea64e16cc2ffb4d90`.
+- The updated CLI identifies that exact image as `Hybrid ISO`, `bootable: true`, `raw_writable: true`. This identifies embedded boot metadata; it is not a boot test.
+- A complete write and mandatory SHA-256 readback simulation of that ISO passed in a new temporary regular file. The temporary copy was removed; no block device was accessed.
+- An original synthetic hybrid fixture adds 22 regression assertions for accepted layouts, malformed/truncated ISO structures, incorrect MBR carriers, GPT bounds/checksums and retained Windows restrictions. Core: **138 checks**; storage: **122 checks**; total: **260 checks**. All five CTest suites passed in standard and AddressSanitizer/UndefinedBehaviorSanitizer builds.
+
+The image-inspection fix does not establish a physical USB, Alpine boot, Polkit or firmware qualification result. No physical USB was written during this investigation. Existing app processes must be closed and reopened to load the rebuilt binary.
+
 ## Published revision CI
 
 [GitHub Actions run 38540398428](https://github.com/Cherie05/Kavrune/actions/runs/38540398428) completed successfully for commit `29b3875073378c28a4ff0c6421b825f066e0fe7c`, created on 14 October 2026 at 14:40 IST. This is evidence for that published revision. The subsequent beginner UI, safe self-test and storage-protection changes require their own CI run after publication; the earlier green run does not validate those changes.

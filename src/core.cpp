@@ -296,7 +296,23 @@ bool protective_mbr(const std::vector<unsigned char>& head) {
     return false;
 }
 
-bool valid_gpt(int fd, const std::vector<unsigned char>& head, uint64_t size) {
+bool isohybrid_mbr(const std::vector<unsigned char>& head, uint64_t size) {
+    if (head.size() < 512 || head[510] != 0x55 || head[511] != 0xaa || size % 512 != 0) return false;
+    const auto* carrier = head.data() + 446;
+    // Some ISO generators map the whole image with an active, type-zero MBR
+    // entry. Recognize that convention only alongside a validated bootable ISO.
+    if (carrier[0] != 0x80 || carrier[4] != 0 || le32(carrier + 8) != 0 || le32(carrier + 12) != size / 512) return false;
+    for (size_t i = 1; i < 4; ++i) {
+        const auto* entry = head.data() + 446 + 16 * i;
+        const uint32_t start = le32(entry + 8), length = le32(entry + 12);
+        if (entry[4] == 0 && start == 0 && length == 0 && entry[0] == 0) continue;
+        if ((entry[0] != 0 && entry[0] != 0x80) || entry[4] == 0 || entry[4] == 0xee || length == 0 ||
+            static_cast<uint64_t>(start) + length > size / 512) return false;
+    }
+    return true;
+}
+
+bool valid_gpt(int fd, const std::vector<unsigned char>& head, uint64_t size, bool hybrid_iso) {
     if (head.size() < 1024 || std::memcmp(head.data() + 512, "EFI PART", 8) != 0) return false;
     const auto* h = head.data() + 512;
     const uint32_t header_size = le32(h + 12);
@@ -325,7 +341,18 @@ bool valid_gpt(int fd, const std::vector<unsigned char>& head, uint64_t size) {
         const auto* entry = entries.data() + static_cast<size_t>(i) * entry_size;
         if (std::all_of(entry, entry + 16, [](unsigned char c) { return c == 0; })) continue;
         const uint64_t begin = le64(entry + 32), end = le64(entry + 40);
-        if (begin < first || end > last || begin > end) throw Error("A GPT partition lies outside the image.");
+        // ISOHybrid's first Basic Data partition intentionally includes sector
+        // zero and the GPT itself. This is a compatibility convention, not a
+        // general relaxation of GPT bounds for raw disk images.
+        constexpr std::array<unsigned char, 16> basic_data = {
+            0xa2, 0xa0, 0xd0, 0xeb, 0xe5, 0xb9, 0x33, 0x44,
+            0x87, 0xc0, 0x68, 0xb6, 0xb7, 0x26, 0x99, 0xc7};
+        const bool iso_carrier = hybrid_iso && i == 0 && begin == 0 && end >= first &&
+            std::equal(basic_data.begin(), basic_data.end(), entry);
+        if (begin > end || end >= sectors)
+            throw Error("A GPT partition extends beyond the image or has reversed bounds.");
+        if ((!iso_carrier && begin < first) || end > last)
+            throw Error("A GPT partition lies outside the declared usable range.");
     }
     return true;
 }
@@ -450,9 +477,6 @@ Image inspect_image(const std::string& path) {
         read_exact(source.get(), footer.data(), footer.size(), image.size - 512);
         if (std::memcmp(footer.data(), "conectix", 8) == 0) throw Error("VHD containers are not supported. Convert this image to raw format first.");
     }
-    const bool mbr = valid_mbr(head, image.size);
-    const bool gpt = valid_gpt(source.get(), head, image.size);
-    const bool disk_layout = gpt || (mbr && !protective_mbr(head));
     std::array<unsigned char, sector_size> pvd {};
     bool iso = false, udf = false, boot = false, terminated = false;
     for (uint64_t sector = 16; sector < 64 && sector * sector_size + sector_size <= image.size; ++sector) {
@@ -469,13 +493,19 @@ Image inspect_image(const std::string& path) {
         else if (descriptor[0] == 255) { terminated = true; break; }
         else if (descriptor[0] != 2 && descriptor[0] != 3) throw Error("The ISO volume descriptor type is invalid.");
     }
+    bool windows = false;
     if (iso) {
         const uint32_t volume_sectors = le32(pvd.data() + 80);
         if (!terminated || volume_sectors == 0 || volume_sectors != be32(pvd.data() + 84) ||
             le16(pvd.data() + 128) != sector_size || static_cast<uint16_t>((pvd[130] << 8) | pvd[131]) != sector_size ||
             static_cast<uint64_t>(volume_sectors) * sector_size > image.size)
             throw Error("The ISO filesystem size or volume descriptor is invalid.");
-        const bool windows = windows_iso(source.get(), static_cast<uint64_t>(volume_sectors) * sector_size, pvd.data());
+        windows = windows_iso(source.get(), static_cast<uint64_t>(volume_sectors) * sector_size, pvd.data());
+    }
+    const bool mbr = valid_mbr(head, image.size);
+    const bool gpt = valid_gpt(source.get(), head, image.size, iso && boot && isohybrid_mbr(head, image.size));
+    const bool disk_layout = gpt || (mbr && !protective_mbr(head));
+    if (iso) {
         image.kind = windows ? "Windows installation ISO" : (disk_layout ? "Hybrid ISO" : "Optical ISO");
         image.bootable = boot;
         image.raw_writable = disk_layout && !windows;
