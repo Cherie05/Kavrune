@@ -81,6 +81,26 @@ The inspector was extended across the [documented image profiles](IMAGE_COMPATIB
 
 These results establish structural recognition and file-copy verification for those exact files, plus the extracted package checks described above. They do not establish physical USB reliability, successful Alpine/Android-x86 installation or booting, UEFI/Secure Boot qualification, or general support for every ISO. Windows extraction, UDF-only/optical-only USB creation and compressed-image streaming remain unimplemented.
 
+## Drive selection and task guidance update
+
+A reported mismatch between the visible USB dropdown and the selected-target state was reproduced in the desktop model. The UI now uses a separate **Choose a USB drive…** placeholder, replaces discovery results together, and synchronizes the same physical selection across Create, Format, Backup and Check USB. A missing or changed device clears the target rather than selecting another drive.
+
+Create USB now shows preparation and boot instructions before image selection. Formatting uses plain-language file-storage choices and validates names/options before confirmation. Backup rejects existing filenames before confirmation and checks available space before unmounting. Read-only operations explain reopening USB volumes afterward, and checksum results identify the algorithm actually calculated.
+
+The storage integration's UDisks method signatures were reviewed without changing devices; the review found no interface mismatch in the advertised operation calls. Read-only `CanFormat` queries reported available utilities for `vfat`, `exfat`, and `ext4`. This establishes advertised utility availability, not successful physical formatting, authorization or recovery behavior.
+
+The completed sanitizer build validated:
+
+- **194 core**, **122 storage**, **329 real GTK selection**, and **55 actual desktop-workflow** assertions: **700 checks** in total. The GTK selection suite constructs no window; the workflow suite constructs the real desktop window without presenting it. Neither starts discovery or opens a physical drive.
+- Selection cases cover a sole drive, explicit choice, all four tool selectors, repeated refresh, disconnect/replacement, and placeholder handling. Actual desktop controls verify matching drive details/review, checksum-mismatch blocking, too-small targets, busy-state gating, source reset, and format-name limits through live GTK signals.
+- All **seven AddressSanitizer/UndefinedBehaviorSanitizer CTest suites passed in 3.07 seconds**. Leak detection is disabled only for the two GTK suites because GTK retains process-wide caches; core and storage leak detection remains enabled.
+- `scripts/package.sh` passed all **seven standard CTest suites in 2.16 seconds** and generated the updated Debian package and direct dependency SPDX inventory.
+- Extraction without system installation confirmed matching desktop/CLI build IDs, no RPATH/RUNPATH or setuid files, and inclusion of notices and [USER_TEST_CHECKLIST.md](USER_TEST_CHECKLIST.md). The extracted CLI safe self-test passed in JSON mode with `physical_usb_tested: false`.
+- A private X11/Xvfb and D-Bus session verified all seven navigation pages, the visible preparation/boot instructions, and the USB-choice placeholder. Default 1120×900 and compact 800×600 layouts were checked for wrapping and sidebar behavior; [preview.png](preview.png) and [preview-small.png](preview-small.png) were updated.
+- Visual QA reported no GTK warnings or application failures. Standard error contained only expected headless DRI3/libEGL acceleration warnings. The file chooser and live USB selection were not exercised in this visual run; the hidden desktop tests above cover selection-control logic. No storage operation or confirmation was invoked, and the isolated QA processes were stopped afterward.
+
+Earlier counts elsewhere in this document apply to their respective revisions. No physical USB writing, formatting, authorization prompt or firmware boot has been qualified by this review. Use [USER_TEST_CHECKLIST.md](USER_TEST_CHECKLIST.md) to record a separate spare-USB trial.
+
 ## Published revision CI
 
 [GitHub Actions run 38540398428](https://github.com/Cherie05/Kavrune/actions/runs/38540398428) completed successfully for commit `29b3875073378c28a4ff0c6421b825f066e0fe7c`, created on 14 October 2026 at 14:40 IST. This is evidence for that published revision. Subsequent beginner UI, safe self-test, storage-protection and image-compatibility changes require their own CI run after publication; the earlier green run does not validate those changes.

@@ -53,7 +53,7 @@ jobs:
           -DKAVRUNE_SANITIZERS=${{ matrix.sanitizers }}
       - name: Compile
         run: cmake --build build --parallel 2
-      - name: File-only safety tests and synthetic BIOS boot
+      - name: Safety tests, GTK drive selection and synthetic BIOS boot
         run: ctest --test-dir build --output-on-failure --timeout 90
       - name: Desktop smoke test
         if: matrix.sanitizers == 'OFF'

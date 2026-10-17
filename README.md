@@ -20,9 +20,11 @@ The compiled desktop application is `build/kavrune`; the CLI is `build/kavrune-c
 
 First click **Try a safe test** on **Create USB**. It uses temporary files to exercise the image writer and readback check; no ISO or USB is required and no physical drive is opened.
 
-For your first physical trial, use a spare USB with no important files. Download a Linux installer ISO from its publisher, choose it in **Create USB**, select the USB by its name and size, and review the erasure confirmation. Kavrune writes the image, saves buffered data, verifies the written portion using SHA-256, and requests a device rescan before reporting success. Leave the USB connected until the final result. A verified write is separate from a boot test on the intended computer.
+For your first physical trial, use a spare USB with no important files. **Create USB** explains what to prepare before starting and how to start a computer from the finished USB. You do not need to format the USB first. Choose the downloaded Linux image, open **Choose a USB drive…**, select your USB by its name and size, and review the erasure confirmation. The chosen drive stays selected across tools and refreshes while the same physical device remains connected.
 
-Read the [beginner guide](docs/GETTING_STARTED.md) for each step and [feature status](docs/FEATURE_STATUS.md) for what is working and what remains to qualify.
+Kavrune writes the image, saves buffered data, verifies the written portion using SHA-256, and requests a device rescan before reporting success. Leave the USB connected until **Written and verified**. A verified write is separate from a boot test on the intended computer.
+
+Read the [beginner guide](docs/GETTING_STARTED.md) for each step, use the [USB test checklist](docs/USER_TEST_CHECKLIST.md) to record your results, and see [feature status](docs/FEATURE_STATUS.md) for what remains to qualify.
 
 See [image compatibility](docs/IMAGE_COMPATIBILITY.md) for supported BIOS/UEFI hybrid profiles and help with refused files. **Check download** can compare complete unsupported files with a publisher's checksum while USB creation stays blocked for those files.
 
@@ -34,9 +36,9 @@ See [image compatibility](docs/IMAGE_COMPATIBILITY.md) for supported BIOS/UEFI h
 | Device discovery | UDisks2 discovery, hotplug refresh, whole-drive filtering and hardware identity checks |
 | Drive protection | System/storage ancestry, configured drives, active swap, holders, read-only and internal disks excluded |
 | Verification | Mandatory SHA-256 comparison after writing; errors and incomplete operations reported |
-| Format USB | Prepare empty file storage using GPT/MBR and FAT32, exFAT or ext4 |
-| Back up USB | Save the entire drive to a new IMG file; refuse overwrites and report SHA-256 |
-| Check download | Calculate SHA-256 or SHA-512 and optionally compare the publisher's checksum; CLI also supports legacy SHA-1/MD5 |
+| Format USB | Choose a USB name and file-storage use; partition settings are under Advanced settings; invalid options are explained before confirmation |
+| Back up USB | Save the entire drive to a new IMG file; check available space, refuse overwrites and report SHA-256 |
+| Check download | Calculate SHA-256 or SHA-512, identify the calculated algorithm, and optionally compare the publisher's checksum; CLI also supports legacy SHA-1/MD5 |
 | Check USB | Read the reported capacity and report read errors without writing data |
 | Activity | Private per-user technical event log |
 | How to use | In-app steps, explanations and current feature limits |
@@ -102,7 +104,9 @@ ctest --test-dir build --output-on-failure
 ./scripts/test-boot.sh ./build/kavrune-cli
 ```
 
-Regression tests use synthetic data in temporary files, not physical drives. `--smoke-test` briefly opens the desktop UI and exits without changing storage. The regression suite covers corruption, cancellation, image mutation, identity changes, image metadata bounds, overwrites and symlinks. The optional boot script uses system QEMU/SeaBIOS to boot an original synthetic MBR image after writing/verifying it; it skips when QEMU is unavailable. Read the [recorded local results](docs/BUILD_RESULTS.md) for completed checks. Real Linux/Windows installer booting, USB writing, format tooling, unplug behavior, and Polkit prompts require the disposable-hardware/VM release matrix in [VALIDATION.md](docs/VALIDATION.md).
+Regression tests use synthetic data in temporary files, not physical drives. The desktop build adds real GTK dropdown and desktop-control tests for selecting, refreshing, clearing and sharing a target across tools. The desktop-control test constructs a hidden window; neither test discovers or opens drives. They use Xvfb when available, otherwise require a display and report a skip if none is available. `--smoke-test` briefly opens the desktop UI and exits without changing storage.
+
+The regression suite covers corruption, cancellation, image mutation, identity changes, image metadata bounds, overwrites and symlinks. The optional boot script uses system QEMU/SeaBIOS to boot an original synthetic MBR image after writing/verifying it; it skips when QEMU is unavailable. Read the [recorded local results](docs/BUILD_RESULTS.md) for completed checks. Real Linux/Windows installer booting, USB writing, format tooling, unplug behavior, and Polkit prompts require the disposable-hardware/VM release matrix in [VALIDATION.md](docs/VALIDATION.md).
 
 ## CLI
 

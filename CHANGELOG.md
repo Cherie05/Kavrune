@@ -2,6 +2,10 @@
 
 ## 0.1.0 — Unreleased development preview
 
+- Fix USB dropdowns showing a drive while the selected-target state remained empty. Add an explicit choice placeholder, synchronize drive selection across all four storage tools, preserve the same device across refreshes, and clear disconnected targets.
+- Show preparation and computer-boot instructions on Create USB before image selection, including that formatting first is unnecessary. Simplify Format USB around use and USB name, place partition options under Advanced settings, and explain invalid options before erase confirmation.
+- Reject existing backup names before confirmation, check available backup space before unmounting, explain reopening volumes after backups/read scans, identify calculated checksum algorithms in results/copy actions, and keep confirmation callbacks tied to the live desktop.
+- Add real GTK selection and desktop-workflow regression tests plus a [spare-USB test checklist](docs/USER_TEST_CHECKLIST.md). Physical writing, authorization and boot qualification remain separate release requirements.
 - Recognize bootable hybrid ISOs with a sector-zero GPT carrier, including Alpine Extended, while retaining GPT checksums, image bounds and strict ordinary disk-image validation.
 - Broaden hybrid image inspection to BIOS/UEFI-only boot catalog sections, EFI zero/one-sector load conventions, generator-selected MBR/GPT carrier types, enhanced ISO descriptors and ISO/UDF bridges.
 - Explain unfinished, compressed, virtual-disk, malformed and unsupported images with specific next steps; allow complete unsupported files in Check download without granting USB-write permission. Document the [compatibility profiles](docs/IMAGE_COMPATIBILITY.md) and inspection limits.

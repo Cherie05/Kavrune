@@ -23,10 +23,12 @@ Run Kavrune as your normal desktop user. Do not launch the whole application wit
 
 ## Create a Linux USB installer
 
+Use **Create USB** to make an installer. You do not need to use **Format USB**, choose a filesystem, or change partition settings first. The **Before you start** instructions and **How to start the computer from this USB** explanation appear above image selection in the app.
+
 1. Download the Linux installer ISO from the operating system publisher. This preview accepts **hybrid ISOs**: installation files already arranged for both discs and USB drives. Kavrune checks the selected file and explains when it cannot write it. Windows installer creation is pending.
 2. Optionally open **Check download**, choose your ISO, and paste the SHA-256 value published by the operating system publisher. A checksum is a file's fingerprint. A match means your file matches that value; use a trusted publisher's website to obtain it. If it does not match, check that the value belongs to that exact download and download the installer again if needed. Resolve the mismatch before writing the USB.
 3. Plug in a spare USB. Copy any files you want to keep to a different drive first. The ISO must also be stored on a different drive.
-4. Open **Create USB** and choose your installer file. Then select the USB by its name and size. Internal and system drives are protected; some adapters cannot supply enough identity information and are refused.
+4. Open **Create USB** and choose your installer file. Open **Choose a USB drive…** and select your USB by its name and size. The selection summary, drive details and review must name that same drive. Your chosen USB remains selected when visiting other tools or refreshing while it stays connected. Disconnecting it clears the selection; another drive is never silently chosen. Internal and system drives are protected; some adapters cannot supply enough identity information and are refused.
 5. Review the selected file and USB. The USB must have enough space for the file. Click **Create USB…** and carefully review the drive name, size, device path and serial in the confirmation. Creating an installer replaces the USB's files and partitions.
 6. Confirm only when you recognize the target. Type the drive name displayed in the confirmation, then click **Erase USB and create**. Approve the Linux password prompt if shown. Leave the USB connected while writing, saving buffered data, and checking the result. A percentage reaching 100% during writing is not the final success message.
 7. Wait for **Written and verified**. Then use your desktop's eject or safely remove action before unplugging the USB.
@@ -47,10 +49,10 @@ Readback verification cannot promise boot compatibility. To check that, restart 
 ## Choose the right tool
 
 - **Create USB:** make an installer from a supported image, or restore a saved raw drive image.
-- **Format USB:** erase the USB and prepare empty space for ordinary files. This does not make an operating system installer and is not a secure erase.
-- **Back up USB:** save the entire selected external drive to a new IMG file on another drive. Allow free space equal to the whole source drive, even if it is mostly empty. The source is unmounted while it is read.
-- **Check download:** calculate a file fingerprint and optionally compare it with the publisher's value. Choose SHA-256 for a new comparison.
-- **Check USB:** read the drive for unreadable areas without writing data. It may take a long time and temporarily unmounts the drive. A passed read test does not prove genuine capacity, write reliability, or future health.
+- **Format USB:** erase the USB and prepare empty space for ordinary files. Choose **USB name** and what you will use it for: FAT32 for broad compatibility, exFAT for individual files larger than 4 GiB, or ext4 for Linux. Partition-table choices are under **Advanced settings**. Invalid names or options show an explanation and keep **Format drive** disabled. This does not make an operating system installer and is not a secure erase.
+- **Back up USB:** save the entire selected external drive to a new IMG file on another drive. Allow free space equal to the whole source drive, even if it is mostly empty. Existing filenames are rejected, and available space is checked before unmounting. The source is unmounted while read; reopen it in your file manager afterward to use its files.
+- **Check download:** calculate a file fingerprint and optionally compare it with the publisher's value. Choose SHA-256 for a new comparison. The result and copy button identify the algorithm actually calculated; choosing another algorithm does not recalculate until you click **Calculate and compare**.
+- **Check USB:** read the drive for unreadable areas without writing data. It may take a long time and unmounts the drive. Reopen it in your file manager afterward. A passed read test does not prove genuine capacity, write reliability, or future health.
 - **Activity:** review progress and error details. Device identifiers and local paths may appear; review them before sharing a log.
 - **How to use:** open the in-app steps and feature limits.
 
@@ -64,4 +66,4 @@ To diagnose a completed download, open **Check download**, choose the file there
 
 After an app update or source rebuild, close Kavrune completely and reopen it so the new image checks are loaded.
 
-See [what is implemented and pending](FEATURE_STATUS.md), [recorded checks](BUILD_RESULTS.md), and the [production validation requirements](VALIDATION.md).
+Use the [USB test checklist](USER_TEST_CHECKLIST.md) to record the results of each tool and the separate boot test. See [what is implemented and pending](FEATURE_STATUS.md), [recorded checks](BUILD_RESULTS.md), and the [production validation requirements](VALIDATION.md).

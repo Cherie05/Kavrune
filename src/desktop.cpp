@@ -2,6 +2,7 @@
 // Original Kavrune desktop implementation. No third-party application UI code.
 #include "kavrune/core.hpp"
 #include "kavrune/storage.hpp"
+#include "kavrune/device_selection.hpp"
 // Keep the API compatible with the Ubuntu 24.04 libadwaita baseline.
 #define ADW_VERSION_MIN_REQUIRED ADW_VERSION_1_4
 #include <adwaita.h>
@@ -74,15 +75,16 @@ struct UniqueFd {
     UniqueFd(const UniqueFd&) = delete;
 };
 class Desktop : public std::enable_shared_from_this<Desktop> {
+    friend struct DesktopUiTest;
     AdwApplication* app_;
     GtkWidget *window_ = nullptr, *stack_ = nullptr, *sidebar_ = nullptr, *split_ = nullptr, *navigation_ = nullptr;
     GtkWidget *progress_card_ = nullptr, *progress_bar_ = nullptr, *progress_title_ = nullptr, *progress_detail_ = nullptr, *cancel_button_ = nullptr;
     GtkWidget *progress_technical_ = nullptr, *progress_expander_ = nullptr;
     GtkWidget *source_name_ = nullptr, *source_description_ = nullptr, *source_size_ = nullptr, *image_hash_ = nullptr, *source_technical_ = nullptr;
     GtkWidget *create_hint_ = nullptr, *review_text_ = nullptr, *image_status_ = nullptr;
-    GtkWidget *check_name_ = nullptr, *check_result_ = nullptr, *expected_ = nullptr, *algorithm_ = nullptr;
+    GtkWidget *check_name_ = nullptr, *check_result_ = nullptr, *expected_ = nullptr, *algorithm_ = nullptr, *copy_hash_ = nullptr;
     GtkWidget *create_ = nullptr, *format_ = nullptr, *backup_ = nullptr, *scan_ = nullptr, *check_ = nullptr;
-    GtkWidget *scheme_ = nullptr, *filesystem_ = nullptr, *volume_label_ = nullptr, *activity_view_ = nullptr, *device_status_ = nullptr;
+    GtkWidget *scheme_ = nullptr, *filesystem_ = nullptr, *volume_label_ = nullptr, *format_hint_ = nullptr, *activity_view_ = nullptr, *device_status_ = nullptr;
     GtkStringList* device_model_ = nullptr;
     std::vector<GtkWidget*> controls_, dropdowns_, device_details_, device_technical_, device_empty_, device_rows_;
     std::vector<Device> devices_;
@@ -147,7 +149,9 @@ class Desktop : public std::enable_shared_from_this<Desktop> {
         gtk_widget_set_tooltip_text(drop, _("External destination drive")); dropdowns_.push_back(drop);
         g_signal_connect(drop, "notify::selected", G_CALLBACK(+[](GObject* o, GParamSpec*, gpointer data) {
             auto* self = static_cast<Desktop*>(data); if (self->syncing_selection_) return;
-            self->selected_ = gtk_drop_down_get_selected(GTK_DROP_DOWN(o)); self->sync_selection(); self->update_controls();
+            const auto index = kavrune::ui::selection_index(gtk_drop_down_get_selected(GTK_DROP_DOWN(o)), self->devices_.size());
+            self->selected_ = index ? static_cast<unsigned>(*index) : GTK_INVALID_LIST_POSITION;
+            self->sync_selection(); self->update_controls();
         }), this);
         append(row, drop); append(contents, row); device_rows_.push_back(row);
         auto* details = label(_("Select your USB from the list."), "card-caption"); gtk_label_set_selectable(GTK_LABEL(details), TRUE); device_details_.push_back(details); append(contents, details);
@@ -163,9 +167,18 @@ class Desktop : public std::enable_shared_from_this<Desktop> {
         append(row, t); append(row, primary); gtk_widget_set_valign(primary, GTK_ALIGN_CENTER); return row;
     }
     const Device* selected_device() const { return selected_ < devices_.size() ? &devices_[selected_] : nullptr; }
+    FormatOptions format_options() const {
+        FormatOptions options;
+        options.scheme = gtk_drop_down_get_selected(GTK_DROP_DOWN(scheme_)) ? "mbr" : "gpt";
+        const auto filesystem = gtk_drop_down_get_selected(GTK_DROP_DOWN(filesystem_));
+        options.filesystem = filesystem == 1 ? "exfat" : filesystem == 2 ? "ext4" : "vfat";
+        options.label = gtk_editable_get_text(GTK_EDITABLE(volume_label_));
+        return options;
+    }
     void sync_selection() {
         syncing_selection_ = true;
-        for (auto* w : dropdowns_) gtk_drop_down_set_selected(GTK_DROP_DOWN(w), selected_);
+        const auto row = kavrune::ui::selection_row(selected_ < devices_.size() ? std::optional<size_t>(selected_) : std::nullopt, devices_.size());
+        for (auto* w : dropdowns_) gtk_drop_down_set_selected(GTK_DROP_DOWN(w), row);
         const auto* d = selected_device(); std::string text = d ? _("Selected: ") + (d->model.empty() ? _("External drive") : d->model) + " · " + human_size(d->size) : devices_.empty() ? "" : _("Select your USB from the list. Kavrune never chooses a drive for you.");
         for (auto* w : device_details_) gtk_label_set_text(GTK_LABEL(w), text.c_str());
         for (auto* w : device_technical_) gtk_label_set_text(GTK_LABEL(w), d ? identity_text(*d).c_str() : _("No drive selected."));
@@ -178,8 +191,16 @@ class Desktop : public std::enable_shared_from_this<Desktop> {
         const auto* d = selected_device(); const bool target = d && d->eligible();
         const bool ready = !busy_ && target && image_.raw_writable && image_.size && image_.size <= d->size && !checksum_failed_;
         gtk_widget_set_sensitive(create_, ready);
-        gtk_widget_set_sensitive(format_, !busy_ && target); gtk_widget_set_sensitive(backup_, !busy_ && target); gtk_widget_set_sensitive(scan_, !busy_ && target);
+        bool format_valid = false;
+        std::string format_hint = target ? _("Ready to erase and prepare this USB for ordinary files.") : _("Choose a USB drive above to continue.");
+        if (target) {
+            try { validate_format_options(format_options(), d->size); format_valid = true; }
+            catch (const Error& error) { format_hint = error.what(); }
+        }
+        gtk_label_set_text(GTK_LABEL(format_hint_), format_hint.c_str());
+        gtk_widget_set_sensitive(format_, !busy_ && target && format_valid); gtk_widget_set_sensitive(backup_, !busy_ && target); gtk_widget_set_sensitive(scan_, !busy_ && target);
         gtk_widget_set_sensitive(check_, !busy_ && !image_.path.empty()); gtk_widget_set_sensitive(cancel_button_, busy_ && can_cancel_);
+        gtk_widget_set_sensitive(copy_hash_, !busy_ && !digest_.empty());
         gtk_widget_set_visible(cancel_button_, busy_);
         if (!image_.path.empty()) {
             gtk_label_set_text(GTK_LABEL(image_status_), checksum_failed_ ? _("Checksum mismatch — blocked") : image_.raw_writable ? (image_.bootable ? _("Ready to write") : _("Check image source")) : image_.kind == "Checksum-only file" ? _("Checksum only") : _("Different creation method needed"));
@@ -273,9 +294,10 @@ class Desktop : public std::enable_shared_from_this<Desktop> {
                 }
                 if (discovery_report != self->device_report_) { self->device_report_ = discovery_report; self->record(discovery_report); }
                 self->syncing_selection_ = true;
-                gtk_string_list_splice(self->device_model_, 0, g_list_model_get_n_items(G_LIST_MODEL(self->device_model_)), nullptr);
-                for (const auto& d : self->devices_) { const std::string text = (d.model.empty() ? _("External drive") : d.model) + " · " + human_size(d.size) + " · " + d.path; gtk_string_list_append(self->device_model_, text.c_str()); }
-                self->syncing_selection_ = false; self->sync_selection(); self->update_controls();
+                std::vector<std::string> choices;
+                for (const auto& d : self->devices_) choices.push_back((d.model.empty() ? _("External drive") : d.model) + " · " + human_size(d.size) + " · " + d.path);
+                kavrune::ui::replace_device_choices(self->device_model_, _("Choose a USB drive…"), choices);
+                self->sync_selection(); self->update_controls();
             });
         }).detach(); }
         catch (const std::exception& error) { refreshing_ = false; record(std::string(_("Could not start drive discovery: ")) + error.what()); }
@@ -377,6 +399,7 @@ class Desktop : public std::enable_shared_from_this<Desktop> {
         gtk_label_set_text(GTK_LABEL(source_technical_), _("Image details appear after you choose a file."));
         gtk_label_set_text(GTK_LABEL(image_hash_), _("No checksum available")); gtk_label_set_text(GTK_LABEL(check_name_), _("No image selected"));
         gtk_label_set_text(GTK_LABEL(check_result_), _("Choose an image to calculate its checksum."));
+        gtk_button_set_label(GTK_BUTTON(copy_hash_), _("Copy checksum"));
     }
     void source_issue(const std::string& path, const std::string& heading, const std::string& advice) {
         reset_source(advice.c_str());
@@ -425,7 +448,8 @@ class Desktop : public std::enable_shared_from_this<Desktop> {
             gtk_widget_add_css_class(image_status_, image_.raw_writable && image_.bootable ? "success" : "warning");
             gtk_label_set_text(GTK_LABEL(source_technical_), (image_.kind + "\n" + image_.description + "\n" + image_.path).c_str());
             gtk_label_set_text(GTK_LABEL(check_name_), (image_.name + "\n" + human_size(image_.size)).c_str()); gtk_label_set_text(GTK_LABEL(image_hash_), digest_.c_str());
-            gtk_label_set_text(GTK_LABEL(check_result_), digest_.c_str());
+            gtk_label_set_text(GTK_LABEL(check_result_), (std::string("SHA-256\n") + digest_).c_str());
+            gtk_button_set_label(GTK_BUTTON(copy_hash_), _("Copy SHA-256"));
             report(image_.kind == "Checksum-only file" ? _("File ready for checksum comparison") : _("Image checked"), explanation);
             technical_result(image_.description);
             update_controls();
@@ -448,7 +472,9 @@ class Desktop : public std::enable_shared_from_this<Desktop> {
                 return result;
             },
             [this, expected, algo](const std::string& result) {
-                digest_ = result; digest_algorithm_ = algo; gtk_label_set_text(GTK_LABEL(check_result_), result.c_str());
+                digest_ = result; digest_algorithm_ = algo;
+                gtk_label_set_text(GTK_LABEL(check_result_), ((algo == "sha512" ? std::string("SHA-512\n") : std::string("SHA-256\n")) + result).c_str());
+                gtk_button_set_label(GTK_BUTTON(copy_hash_), algo == "sha512" ? _("Copy SHA-512") : _("Copy SHA-256"));
                 if (expected.empty()) report(_("Checksum calculated"), _("Compare this checksum with one published by the image publisher."));
                 else if (expected == result) { checksum_failed_ = false; report(_("Checksum matches"), image_.raw_writable ? _("The image matches the publisher's checksum. You can continue creating your USB.") : image_.kind == "Checksum-only file" ? _("The file matches the publisher's checksum. Checksum verification does not make this file suitable for creating a USB.") : _("The file matches the publisher's checksum. It still needs the creation method explained in step 1.")); record(_("Expected checksum matched.")); }
                 else { checksum_failed_ = true; report(_("Checksum does not match"), _("Creating a USB is blocked. Check that you pasted the correct checksum, or download the image again and choose it again."), true); record(_("Expected checksum did not match.")); }
@@ -460,6 +486,7 @@ class Desktop : public std::enable_shared_from_this<Desktop> {
         if (destructive) details += "\n\n" + std::string(_("All existing files and partitions on this drive will be lost. This operation is not a secure full-drive erase."));
         else details += "\n\n" + std::string(_("Mounted volumes will be unmounted. This operation reads the drive without changing its contents."));
         auto* dialog = adw_message_dialog_new(GTK_WINDOW(window_), action, details.c_str());
+        gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
         adw_message_dialog_add_response(ADW_MESSAGE_DIALOG(dialog), "cancel", _("Cancel")); adw_message_dialog_add_response(ADW_MESSAGE_DIALOG(dialog), "proceed", action);
         adw_message_dialog_set_default_response(ADW_MESSAGE_DIALOG(dialog), "cancel"); adw_message_dialog_set_close_response(ADW_MESSAGE_DIALOG(dialog), "cancel");
         if (destructive) {
@@ -473,7 +500,8 @@ class Desktop : public std::enable_shared_from_this<Desktop> {
                 auto* c = static_cast<ConfirmEntry*>(data); adw_message_dialog_set_response_enabled(c->dialog, "proceed", c->required == gtk_editable_get_text(e));
             }), new ConfirmEntry{ADW_MESSAGE_DIALOG(dialog), required}, +[](gpointer p, GClosure*) { delete static_cast<ConfirmEntry*>(p); }, G_CONNECT_DEFAULT);
         }
-        auto* callback = new Fn(std::move(execute));
+        auto self = shared_from_this();
+        auto* callback = new Fn([self, execute = std::move(execute)] { if (self->alive_ && !self->busy_) execute(); });
         g_signal_connect_data(dialog, "response", G_CALLBACK(+[](AdwMessageDialog*, const char* response, gpointer data) {
             if (std::string(response) == "proceed") (*static_cast<Fn*>(data))();
         }), callback, +[](gpointer p, GClosure*) { delete static_cast<Fn*>(p); }, G_CONNECT_DEFAULT); gtk_window_present(GTK_WINDOW(dialog));
@@ -504,15 +532,15 @@ class Desktop : public std::enable_shared_from_this<Desktop> {
     }
     void format_drive() {
         const auto* selected = selected_device(); if (busy_ || !selected) return; const Device target = *selected;
-        FormatOptions options; options.scheme = gtk_drop_down_get_selected(GTK_DROP_DOWN(scheme_)) ? "mbr" : "gpt";
-        const unsigned fs = gtk_drop_down_get_selected(GTK_DROP_DOWN(filesystem_)); options.filesystem = fs == 1 ? "exfat" : fs == 2 ? "ext4" : "vfat";
-        options.label = gtk_editable_get_text(GTK_EDITABLE(volume_label_));
+        const auto options = format_options();
+        try { validate_format_options(options, target.size); }
+        catch (const Error& error) { message(_("Check the USB settings"), error.what()); return; }
         const std::string plan = std::string(_("Create a new ")) + (options.scheme == "gpt" ? "GPT" : "MBR") + _(" partition table with one ") +
             (options.filesystem == "vfat" ? "FAT32" : options.filesystem == "exfat" ? "exFAT" : "ext4") + _(" volume. Label: ") + options.label;
         confirm_device(_("Erase and format drive"), target, true, plan, [this, target, options] {
             work(_("Formatting drive"), [target, options](const ProgressFn& progress, const std::atomic_bool& cancel) {
                 Storage storage; storage.format(target, options, progress, cancel); return std::string(_("Drive formatted successfully. It is ready for files."));
-            }, {}, false, true);
+            }, [this](const std::string& result) { report(_("USB ready for files"), result + " " + _("Open the USB in your file manager to copy files onto it.")); }, false, true);
         });
     }
     void backup_drive() {
@@ -525,15 +553,27 @@ class Desktop : public std::enable_shared_from_this<Desktop> {
             if (!file) { if (error && !g_error_matches(error, GTK_DIALOG_ERROR, GTK_DIALOG_ERROR_DISMISSED)) ctx->self->message(_("Could not choose backup location"), error->message); g_clear_error(&error); return; }
             char* p = g_file_get_path(file); g_object_unref(file); if (!p) { ctx->self->message(_("Local folder required"), _("Choose a local folder for this backup.")); return; }
             std::string destination(p); g_free(p); const Device target = ctx->target; auto self = ctx->self;
+            std::error_code exists_error;
+            if (std::filesystem::exists(destination, exists_error)) {
+                self->message(_("Choose a new backup filename"), _("A file already exists there. Kavrune preserves existing files. Choose another filename or folder for this backup.")); return;
+            }
+            if (exists_error) { self->message(_("Check the backup folder"), exists_error.message()); return; }
             self->confirm_device(_("Back up drive"), target, false, std::string(_("Save the whole drive (") ) + human_size(target.size) + _(") to:\n") + destination + _("\nExisting files will never be overwritten."), [self, target, destination] {
                 self->work(_("Backing up drive"), [target, destination](const ProgressFn& progress, const std::atomic_bool& cancel) {
                     Storage storage; const auto checked = storage.revalidate(target);
                     const std::string parent = std::filesystem::path(destination).parent_path().string();
                     if (storage.source_on_device(parent, checked)) throw Error(_("The backup cannot be saved onto the drive being backed up."));
+                    std::error_code space_error;
+                    const auto space = std::filesystem::space(parent, space_error);
+                    if (!space_error && space.available < checked.size)
+                        throw Error(_("There is not enough free space in the backup folder for the whole USB. Choose a folder on a drive with more free space."));
                     if (cancel) throw Cancelled();
                     storage.unmount(checked); const auto current = storage.revalidate(checked); UniqueFd fd(storage.open_device(current, false));
                     const auto hash = backup_image(fd.fd, current.size, destination, progress, cancel);
-                    return std::string(_("Backup saved. SHA-256: ")) + hash;
+                    return hash;
+                }, [self, destination](const std::string& hash) {
+                    self->report(_("Backup saved"), _("Your full USB backup is saved. To use the USB's files again, open it in your file manager; its volumes were unmounted while backing up."));
+                    self->technical_result(destination + "\nSHA-256: " + hash);
                 });
             });
         }, new SaveContext{shared_from_this(), target}); g_object_unref(dialog);
@@ -544,8 +584,8 @@ class Desktop : public std::enable_shared_from_this<Desktop> {
             work(_("Scanning drive"), [target](const ProgressFn& progress, const std::atomic_bool& cancel) {
                 Storage storage; const auto checked = storage.revalidate(target); if (cancel) throw Cancelled(); storage.unmount(checked);
                 const auto current = storage.revalidate(checked); UniqueFd fd(storage.open_device(current, false)); read_scan(fd.fd, current.size, progress, cancel);
-                return std::string(_("Full read scan passed. No unreadable bytes were found. This does not verify genuine capacity."));
-            });
+                return std::string(_("No unreadable bytes were found. This does not test genuine capacity or writing. To use the USB's files again, open it in your file manager; its volumes were unmounted during the check."));
+            }, [this](const std::string& result) { report(_("USB read check passed"), result); });
         });
     }
     void safe_test() {
@@ -581,6 +621,12 @@ class Desktop : public std::enable_shared_from_this<Desktop> {
     }
     void build_create() {
         auto* v = page("create"); append(v, hero(_("USB CREATION"), _("Create your bootable USB"), _("Put a Linux system image on a USB so you can try or install it on a computer.")));
+        auto* preparation = box(GTK_ORIENTATION_VERTICAL, 8); gtk_widget_add_css_class(preparation, "safety-note");
+        append(preparation, label(_("Before you start"), "card-title"));
+        append(preparation, label(_("1. Download a complete USB-ready Linux ISO to your computer.\n2. Copy any files you need from the USB to another drive. This USB will be erased.\n3. Choose the image and your USB below. You do not need to format it first."), "card-caption"));
+        auto* boot_help = gtk_expander_new(_("How to start the computer from this USB"));
+        gtk_expander_set_child(GTK_EXPANDER(boot_help), label(_("After Written and verified appears: safely eject the USB, reconnect it to the computer you want to start, restart that computer, and select the USB in its boot menu. The boot-menu key depends on the computer; check its manufacturer's instructions. Reaching the Linux installer or live system is enough for a boot test. Start installation only when you intend to change that computer's disks."), "card-caption"));
+        append(preparation, boot_help); append(v, preparation);
         auto* intro = box(GTK_ORIENTATION_HORIZONTAL, 12); auto* intro_text = label(_("First time? Test Kavrune safely without a USB."), "card-caption"); gtk_widget_set_hexpand(intro_text, TRUE); append(intro, intro_text);
         auto* test = control(button(_("Try a safe test"), "secondary-button")); click(test, [this] { safe_test(); }); append(intro, test); append(v, intro);
         GtkWidget* contents; append(v, card("1", _("Choose your system image"), _("Download an ISO or IMG from your operating system's official website, then choose the file here."), &contents));
@@ -590,7 +636,7 @@ class Desktop : public std::enable_shared_from_this<Desktop> {
         gtk_label_set_selectable(GTK_LABEL(source_name_), TRUE); append(info, source_name_); append(info, source_description_); append(info, source_size_); append(row, info);
         append(contents, row);
         auto* source_actions = box(GTK_ORIENTATION_HORIZONTAL, 12); auto* choose = control(button(_("Choose image…"), "secondary-button")); click(choose, [this] { choose_image(); }); append(source_actions, choose);
-        image_status_ = label(_("Choose an image"), "status-badge"); append(source_actions, image_status_); append(contents, source_actions);
+        image_status_ = label(_("Choose an image"), "status-badge"); gtk_widget_set_hexpand(image_status_, TRUE); append(source_actions, image_status_); append(contents, source_actions);
         auto* expander = gtk_expander_new(_("Image details and checksum")); auto* details = box(GTK_ORIENTATION_VERTICAL, 8);
         source_technical_ = label(_("Image details appear after you choose a file."), "technical-text"); gtk_label_set_selectable(GTK_LABEL(source_technical_), TRUE); append(details, source_technical_);
         append(details, label("SHA-256", "card-caption")); image_hash_ = label(_("Calculated automatically after selection"), "checksum");
@@ -604,37 +650,43 @@ class Desktop : public std::enable_shared_from_this<Desktop> {
     }
     void build_format() {
         auto* v = page("format"); append(v, hero(_("EVERYDAY FILES"), _("Use your USB for files"), _("Erase the USB and make space for photos, documents and other files. This does not install an operating system."))); append(v, target_card("1"));
-        GtkWidget* contents; append(v, card("2", _("Set up your USB"), _("The defaults work for most computers. Change these settings only if you need to."), &contents));
-        auto field = [this, contents](const char* text, GtkWidget* w) { auto* row = box(GTK_ORIENTATION_VERTICAL, 6); append(row, label(text, "card-title")); gtk_widget_set_hexpand(w, TRUE); append(row, control(w)); append(contents, row); };
-        const char* schemes[] = {"GPT (modern devices)", "MBR (legacy compatibility)", nullptr}; scheme_ = gtk_drop_down_new_from_strings(schemes); field(_("Partition table"), scheme_);
-        const char* filesystems[] = {"FAT32 · widely compatible", "exFAT · large files", "ext4 · Linux", nullptr}; filesystem_ = gtk_drop_down_new_from_strings(filesystems); field(_("Filesystem"), filesystem_);
-        volume_label_ = gtk_entry_new(); gtk_editable_set_text(GTK_EDITABLE(volume_label_), "KAVRUNE"); gtk_entry_set_max_length(GTK_ENTRY(volume_label_), 16); field(_("Volume label"), volume_label_);
+        GtkWidget* contents; append(v, card("2", _("Set up your USB"), _("Keep the defaults for everyday files. Use exFAT if you need files larger than 4 GB."), &contents));
+        auto field = [this](GtkWidget* parent, const char* text, GtkWidget* w) { auto* row = box(GTK_ORIENTATION_VERTICAL, 6); append(row, label(text, "card-title")); gtk_widget_set_hexpand(w, TRUE); append(row, control(w)); append(parent, row); };
+        const char* filesystems[] = {"FAT32 · everyday files, widely compatible", "exFAT · files larger than 4 GB", "ext4 · Linux computers only", nullptr}; filesystem_ = gtk_drop_down_new_from_strings(filesystems); field(contents, _("What will you use it for?"), filesystem_);
+        volume_label_ = gtk_entry_new(); gtk_editable_set_text(GTK_EDITABLE(volume_label_), "KAVRUNE"); gtk_entry_set_max_length(GTK_ENTRY(volume_label_), 16); field(contents, _("USB name"), volume_label_);
+        append(contents, label(_("Use letters, numbers, spaces, underscores or hyphens. FAT32 names allow 11 characters, exFAT 15, and ext4 16."), "card-caption"));
+        auto* advanced = gtk_expander_new(_("Advanced settings")); auto* advanced_contents = box(GTK_ORIENTATION_VERTICAL, 8);
+        const char* schemes[] = {"GPT · modern computers (default)", "MBR · older devices", nullptr}; scheme_ = gtk_drop_down_new_from_strings(schemes); field(advanced_contents, _("Partition table"), scheme_);
+        gtk_expander_set_child(GTK_EXPANDER(advanced), advanced_contents); append(contents, advanced);
         append(v, note(_("Formatting removes files and partitions. FAT32 limits individual files to 4 GiB. exFAT works well for larger files; ext4 is intended for Linux."), true));
         format_ = button(_("Format drive"), "destructive-action"); gtk_widget_add_css_class(format_, "action-button"); click(format_, [this] { format_drive(); });
         append(v, action_row(format_, _("Formatting cannot be cancelled once it starts.")));
+        format_hint_ = label("", "next-step"); append(v, format_hint_);
+        for (auto* setting : {filesystem_, scheme_}) g_signal_connect(setting, "notify::selected", G_CALLBACK(+[](GObject*, GParamSpec*, gpointer data) { static_cast<Desktop*>(data)->update_controls(); }), this);
+        g_signal_connect(volume_label_, "changed", G_CALLBACK(+[](GtkEditable*, gpointer data) { static_cast<Desktop*>(data)->update_controls(); }), this);
     }
     void build_backup() {
         auto* v = page("backup"); append(v, hero(_("KEEP YOUR DATA"), _("Back up your USB"), _("Save a complete copy of your USB in one file before you erase or change it."))); append(v, target_card("1"));
-        GtkWidget* contents; append(v, card("02", _("Choose where to save"), _("The backup is an uncompressed IMG file, the size of the whole drive."), &contents));
+        GtkWidget* contents; append(v, card("2", _("Choose where to save"), _("The backup is an uncompressed IMG file, the size of the whole drive."), &contents));
         append(contents, label(_("Choose a destination on a different drive with enough free space. Existing files are protected against overwrite. A cancelled backup is removed automatically."), "card-caption"));
         append(v, note(_("The source is opened read-only. Mounted volumes are unmounted to keep the backup consistent. Restore a backup later using Create USB.")));
         backup_ = button(_("Save backup…"), "suggested-action"); gtk_widget_add_css_class(backup_, "action-button"); click(backup_, [this] { backup_drive(); }); append(v, action_row(backup_, _("Your source drive contents are preserved.")));
     }
     void build_check() {
         auto* v = page("check"); append(v, hero(_("CHECK YOUR DOWNLOAD"), _("Is your image file complete?"), _("A checksum is a file's fingerprint. Compare it with the one on the publisher's website to check your download.")));
-        GtkWidget* contents; append(v, card("01", _("Select your image"), _("Checksums validate file integrity. Use a trusted publisher's checksum."), &contents));
+        GtkWidget* contents; append(v, card("1", _("Select your image"), _("Checksums validate file integrity. Use a trusted publisher's checksum."), &contents));
         auto* row = box(GTK_ORIENTATION_HORIZONTAL, 16); check_name_ = label(_("No image selected"), "file-name"); gtk_widget_set_hexpand(check_name_, TRUE); append(row, check_name_);
         auto* choose = control(button(_("Choose image…"), "secondary-button")); click(choose, [this] { choose_image(true); }); append(row, choose); append(contents, row);
-        append(v, card("02", _("Compare a checksum"), _("Expected value is optional. Paste the hexadecimal value only."), &contents));
+        append(v, card("2", _("Compare a checksum"), _("Expected value is optional. Paste the hexadecimal value only."), &contents));
         const char* algorithms[] = {"SHA-256", "SHA-512", nullptr}; algorithm_ = control(gtk_drop_down_new_from_strings(algorithms)); append(contents, algorithm_);
         expected_ = control(gtk_entry_new()); gtk_entry_set_placeholder_text(GTK_ENTRY(expected_), _("Expected checksum from the publisher")); gtk_entry_set_max_length(GTK_ENTRY(expected_), 256); gtk_widget_set_tooltip_text(expected_, _("Expected hexadecimal checksum")); append(contents, expected_);
         check_result_ = label(_("The calculated checksum will appear here."), "checksum"); gtk_label_set_selectable(GTK_LABEL(check_result_), TRUE); gtk_label_set_wrap_mode(GTK_LABEL(check_result_), PANGO_WRAP_CHAR); append(contents, check_result_);
-        auto* copy = button(_("Copy checksum"), "secondary-button"); click(copy, [this] { if (!digest_.empty()) gdk_clipboard_set_text(gtk_widget_get_clipboard(window_), digest_.c_str()); }); gtk_widget_set_halign(copy, GTK_ALIGN_START); append(contents, copy);
+        copy_hash_ = button(_("Copy checksum"), "secondary-button"); click(copy_hash_, [this] { if (!digest_.empty()) gdk_clipboard_set_text(gtk_widget_get_clipboard(window_), digest_.c_str()); }); gtk_widget_set_halign(copy_hash_, GTK_ALIGN_START); append(contents, copy_hash_);
         check_ = button(_("Calculate and compare"), "suggested-action"); gtk_widget_add_css_class(check_, "action-button"); click(check_, [this] { calculate_checksum(); }); append(v, action_row(check_, _("Reads only the selected image file.")));
     }
     void build_scan() {
         auto* v = page("scan"); append(v, hero(_("CHECK YOUR USB"), _("Check for reading problems"), _("Read the USB to find data that cannot be read. Your files are kept."))); append(v, target_card("1"));
-        GtkWidget* contents; append(v, card("02", _("Full read scan"), _("Every address reported by the drive is read once."), &contents));
+        GtkWidget* contents; append(v, card("2", _("Full read scan"), _("Every address reported by the drive is read once."), &contents));
         append(contents, label(_("This may take hours on a large drive. A successful scan means its contents were readable during this operation. It does not detect fake capacity, test write reliability, or predict future failures."), "card-caption"));
         append(v, note(_("The drive is opened read-only. Its volumes are unmounted before scanning. You can cancel the scan at any time.")));
         scan_ = button(_("Scan drive"), "suggested-action"); gtk_widget_add_css_class(scan_, "action-button"); click(scan_, [this] { scan_drive(); }); append(v, action_row(scan_, _("No data is written by this scan.")));
@@ -724,7 +776,9 @@ class Desktop : public std::enable_shared_from_this<Desktop> {
         device_status_ = label(_("Checking connected drives…"), "sidebar-footer"); append(sidebar_, device_status_);
         auto* main = box(GTK_ORIENTATION_VERTICAL, 0); gtk_widget_set_hexpand(main, TRUE); adw_overlay_split_view_set_content(ADW_OVERLAY_SPLIT_VIEW(split_), main);
         stack_ = gtk_stack_new(); gtk_stack_set_transition_type(GTK_STACK(stack_), GTK_STACK_TRANSITION_TYPE_CROSSFADE); gtk_stack_set_transition_duration(GTK_STACK(stack_), 150); gtk_widget_set_vexpand(stack_, TRUE); append(main, stack_);
-        device_model_ = gtk_string_list_new(nullptr); build_create(); build_format(); build_backup(); build_check(); build_scan(); build_activity(); build_help();
+        device_model_ = gtk_string_list_new(nullptr);
+        kavrune::ui::replace_device_choices(device_model_, _("Choose a USB drive…"), {});
+        build_create(); build_format(); build_backup(); build_check(); build_scan(); build_activity(); build_help();
         g_signal_connect(navigation, "row-selected", G_CALLBACK(+[](GtkListBox*, GtkListBoxRow* row, gpointer data) {
             if (row) {
                 auto* self = static_cast<Desktop*>(data);
@@ -765,6 +819,7 @@ public:
 struct Options { bool smoke = false, startup_failed = false; std::shared_ptr<Desktop> desktop; };
 }
 
+#ifndef KAVRUNE_DESKTOP_TEST
 int main(int argc, char** argv) {
     Options options;
     for (int i = 1; i < argc; ++i) {
@@ -795,3 +850,4 @@ int main(int argc, char** argv) {
     int run_argc = 1; const int status = g_application_run(G_APPLICATION(application), run_argc, argv);
     options.desktop.reset(); g_object_unref(application); return options.startup_failed ? 1 : status;
 }
+#endif
