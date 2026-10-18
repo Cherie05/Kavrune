@@ -808,6 +808,7 @@ std::string backup_image(int source_fd, uint64_t capacity, const std::string& de
     const auto parent_path = destination_path.has_parent_path() ? destination_path.parent_path() : std::filesystem::path(".");
     Fd parent(::open(parent_path.c_str(), O_RDONLY | O_CLOEXEC | O_DIRECTORY));
     if (parent.get() < 0) system_error("Could not open the backup destination directory");
+    const auto parent_identity = file_stat(parent.get());
     Fd output(::openat(parent.get(), filename.c_str(), O_WRONLY | O_CLOEXEC | O_CREAT | O_EXCL | O_NOFOLLOW, 0600));
     if (output.get() < 0) system_error("Could not create the backup (existing files are never overwritten)");
     const auto created = file_stat(output.get());
@@ -835,14 +836,24 @@ std::string backup_image(int source_fd, uint64_t capacity, const std::string& de
                 final_source.st_ctim.tv_sec != initial_source.st_ctim.tv_sec || final_source.st_ctim.tv_nsec != initial_source.st_ctim.tv_nsec)
                 throw Error("The backup source changed while it was being read. The incomplete backup was discarded.");
         }
-        struct stat current_destination {};
-        if (::fstatat(parent.get(), filename.c_str(), &current_destination, AT_SYMLINK_NOFOLLOW) != 0 ||
-            current_destination.st_dev != created.st_dev || current_destination.st_ino != created.st_ino || !S_ISREG(current_destination.st_mode))
-            throw Error("The backup destination was moved or replaced while writing. No replacement file will be removed.");
+        const auto validate_destination = [&] {
+            struct stat current_parent {};
+            if (::stat(parent_path.c_str(), &current_parent) != 0 || !S_ISDIR(current_parent.st_mode) ||
+                current_parent.st_dev != parent_identity.st_dev || current_parent.st_ino != parent_identity.st_ino)
+                throw Error("The backup destination folder was moved or replaced while saving. No replacement file will be removed.");
+            struct stat current_destination {};
+            if (::fstatat(parent.get(), filename.c_str(), &current_destination, AT_SYMLINK_NOFOLLOW) != 0 ||
+                current_destination.st_dev != created.st_dev || current_destination.st_ino != created.st_ino || !S_ISREG(current_destination.st_mode))
+                throw Error("The backup destination was moved or replaced while saving. No replacement file will be removed.");
+        };
+        validate_destination();
         reporter.emit("Synchronizing", capacity, capacity);
         sync_fd(output.get());
         cancelled(cancel);
         sync_fd(parent.get());
+        // Saving can block for a long time. Do not claim the chosen path contains
+        // this backup if its file or containing folder changed during that wait.
+        validate_destination();
         const auto result = digest.finish();
         reporter.emit("Complete", capacity, capacity, "Raw backup created with SHA-256 checksum.");
         complete = true;
@@ -901,12 +912,16 @@ std::string log_path() {
 void log_event(const std::string& message) {
     std::lock_guard<std::mutex> lock(log_mutex);
     Fd directory = secure_state_directory();
-    Fd output(::openat(directory.get(), "events.log", O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600));
+    // A substituted FIFO must fail immediately, before the descriptor type check.
+    // O_NONBLOCK has no effect on the ordinary regular files accepted below.
+    Fd output(::openat(directory.get(), "events.log", O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK, 0600));
     if (output.get() < 0) system_error("Could not securely open the event log");
     const auto st = file_stat(output.get());
     if (!S_ISREG(st.st_mode) || st.st_uid != ::geteuid() || st.st_nlink != 1) throw Error("The event log has an unsafe owner, type, or link count.");
     if (::fchmod(output.get(), 0600) != 0) system_error("Could not secure log permissions");
-    while (::flock(output.get(), LOCK_EX) != 0) { if (errno != EINTR) system_error("Could not lock the event log"); }
+    // Logging is optional. A competing or suspended writer must never block
+    // the UI or keep a completed storage operation in a busy state.
+    while (::flock(output.get(), LOCK_EX | LOCK_NB) != 0) { if (errno != EINTR) system_error("Could not lock the event log"); }
     std::time_t now = std::time(nullptr);
     struct tm calendar {};
     ::localtime_r(&now, &calendar);

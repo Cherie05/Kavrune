@@ -74,6 +74,136 @@ struct UniqueFd {
     ~UniqueFd() { if (fd >= 0) close(fd); }
     UniqueFd(const UniqueFd&) = delete;
 };
+// Legal documents are compiled into the application: reading them never opens
+// a browser, depends on the installation prefix, or starts a storage operation.
+struct LegalViewer {
+    GtkWidget *window = nullptr, *documents = nullptr, *search = nullptr, *body = nullptr, *status = nullptr;
+    static constexpr const char* filenames[] = {"TERMS.md", "PRIVACY.md", "DISCLAIMER.md", "LICENSE"};
+
+    void find(bool backwards = false, bool next = false) {
+        auto* buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(body));
+        const char* query = gtk_editable_get_text(GTK_EDITABLE(search));
+        GtkTextIter start, end, match_start, match_end;
+        gtk_text_buffer_get_bounds(buffer, &start, &end);
+        if (!*query) {
+            gtk_text_buffer_place_cursor(buffer, &start);
+            gtk_label_set_text(GTK_LABEL(status), _("Read these documents offline. Select text to copy it."));
+            return;
+        }
+        GtkTextIter from = backwards ? end : start;
+        if (next) {
+            GtkTextIter selection_start, selection_end;
+            if (gtk_text_buffer_get_selection_bounds(buffer, &selection_start, &selection_end))
+                from = backwards ? selection_start : selection_end;
+        }
+        const auto flags = static_cast<GtkTextSearchFlags>(GTK_TEXT_SEARCH_TEXT_ONLY | GTK_TEXT_SEARCH_CASE_INSENSITIVE);
+        bool found = backwards ? gtk_text_iter_backward_search(&from, query, flags, &match_start, &match_end, nullptr) :
+            gtk_text_iter_forward_search(&from, query, flags, &match_start, &match_end, nullptr);
+        if (!found && next) {
+            from = backwards ? end : start;
+            found = backwards ? gtk_text_iter_backward_search(&from, query, flags, &match_start, &match_end, nullptr) :
+                gtk_text_iter_forward_search(&from, query, flags, &match_start, &match_end, nullptr);
+        }
+        if (found) {
+            gtk_text_buffer_select_range(buffer, &match_start, &match_end);
+            gtk_text_view_scroll_to_iter(GTK_TEXT_VIEW(body), &match_start, 0.15, FALSE, 0, 0);
+            gtk_label_set_text(GTK_LABEL(status), _("Match selected. Use the arrows or Enter to find another."));
+        } else {
+            gtk_text_buffer_place_cursor(buffer, &start);
+            gtk_label_set_text(GTK_LABEL(status), _("No matching text in this document."));
+        }
+    }
+    void load() {
+        const auto index = gtk_drop_down_get_selected(GTK_DROP_DOWN(documents));
+        if (index >= G_N_ELEMENTS(filenames)) return;
+        const std::string path = std::string("/org/kavrune/Kavrune/legal/") + filenames[index];
+        GError* error = nullptr;
+        GBytes* bytes = g_resources_lookup_data(path.c_str(), G_RESOURCE_LOOKUP_FLAGS_NONE, &error);
+        auto* buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(body));
+        if (bytes) {
+            gsize length = 0; const auto* data = static_cast<const char*>(g_bytes_get_data(bytes, &length));
+            if (g_utf8_validate(data, static_cast<gssize>(length), nullptr))
+                gtk_text_buffer_set_text(buffer, data, static_cast<int>(length));
+            else gtk_text_buffer_set_text(buffer, _("This document could not be read. See the legal files included with your application package."), -1);
+            g_bytes_unref(bytes);
+        } else {
+            gtk_text_buffer_set_text(buffer, _("This document is unavailable. See the legal files included with your application package."), -1);
+            g_clear_error(&error);
+        }
+        find();
+        GtkTextIter first; gtk_text_buffer_get_start_iter(buffer, &first);
+        if (!*gtk_editable_get_text(GTK_EDITABLE(search))) gtk_text_view_scroll_to_iter(GTK_TEXT_VIEW(body), &first, 0, FALSE, 0, 0);
+    }
+    static GtkWidget* create(GtkWindow* parent) {
+        auto* viewer = new LegalViewer;
+        auto* dialog = adw_window_new(); viewer->window = dialog;
+        g_object_set_data_full(G_OBJECT(dialog), "kavrune-legal-viewer", viewer, +[](gpointer data) { delete static_cast<LegalViewer*>(data); });
+        gtk_window_set_title(GTK_WINDOW(dialog), _("Legal & privacy"));
+        gtk_window_set_default_size(GTK_WINDOW(dialog), 700, 650);
+        gtk_widget_set_size_request(dialog, 340, 360);
+        gtk_window_set_transient_for(GTK_WINDOW(dialog), parent);
+        gtk_window_set_destroy_with_parent(GTK_WINDOW(dialog), TRUE);
+        gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
+        auto* outer = box(GTK_ORIENTATION_VERTICAL, 0);
+        auto* header = adw_header_bar_new();
+        adw_header_bar_set_title_widget(ADW_HEADER_BAR(header), adw_window_title_new(_("Legal & privacy"), _("Included with Kavrune · available offline")));
+        append(outer, header);
+        auto* content = box(GTK_ORIENTATION_VERTICAL, 12);
+        gtk_widget_set_margin_start(content, 16); gtk_widget_set_margin_end(content, 16);
+        gtk_widget_set_margin_top(content, 12); gtk_widget_set_margin_bottom(content, 16);
+        gtk_widget_set_vexpand(content, TRUE); append(outer, content);
+        const char* titles[] = {_("Terms of use"), _("Privacy notice"), _("Disclaimer & no warranty"), _("MIT license"), nullptr};
+        viewer->documents = gtk_drop_down_new_from_strings(titles);
+        auto* document_label = gtk_label_new_with_mnemonic(_("_Document")); gtk_label_set_xalign(GTK_LABEL(document_label), 0);
+        gtk_label_set_mnemonic_widget(GTK_LABEL(document_label), viewer->documents);
+        append(content, document_label); append(content, viewer->documents);
+        auto* row = box(GTK_ORIENTATION_HORIZONTAL, 6);
+        viewer->search = gtk_search_entry_new(); gtk_widget_set_hexpand(viewer->search, TRUE);
+        g_object_set(viewer->search, "placeholder-text", _("Find in this document…"), nullptr);
+        gtk_accessible_update_property(GTK_ACCESSIBLE(viewer->search), GTK_ACCESSIBLE_PROPERTY_LABEL, _("Find in this document"), -1);
+        append(row, viewer->search);
+        auto* previous = gtk_button_new_from_icon_name("go-up-symbolic"); gtk_widget_set_tooltip_text(previous, _("Previous match"));
+        auto* next = gtk_button_new_from_icon_name("go-down-symbolic"); gtk_widget_set_tooltip_text(next, _("Next match"));
+        gtk_accessible_update_property(GTK_ACCESSIBLE(previous), GTK_ACCESSIBLE_PROPERTY_LABEL, _("Previous match"), -1);
+        gtk_accessible_update_property(GTK_ACCESSIBLE(next), GTK_ACCESSIBLE_PROPERTY_LABEL, _("Next match"), -1);
+        click(previous, [viewer] { viewer->find(true, true); }); click(next, [viewer] { viewer->find(false, true); });
+        append(row, previous); append(row, next); append(content, row);
+        viewer->body = gtk_text_view_new(); gtk_text_view_set_editable(GTK_TEXT_VIEW(viewer->body), FALSE);
+        gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(viewer->body), GTK_WRAP_WORD_CHAR);
+        gtk_text_view_set_left_margin(GTK_TEXT_VIEW(viewer->body), 14); gtk_text_view_set_right_margin(GTK_TEXT_VIEW(viewer->body), 14);
+        gtk_text_view_set_top_margin(GTK_TEXT_VIEW(viewer->body), 14); gtk_text_view_set_bottom_margin(GTK_TEXT_VIEW(viewer->body), 14);
+        gtk_accessible_update_property(GTK_ACCESSIBLE(viewer->body), GTK_ACCESSIBLE_PROPERTY_LABEL, _("Legal document text"), -1);
+        auto* scroll = gtk_scrolled_window_new(); gtk_widget_set_vexpand(scroll, TRUE);
+        gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+        gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), viewer->body); gtk_widget_add_css_class(scroll, "card"); append(content, scroll);
+        viewer->status = label("", "card-caption"); append(content, viewer->status);
+        auto* close = button(_("Close"), "secondary-button"); gtk_widget_set_halign(close, GTK_ALIGN_END);
+        click(close, [dialog] { gtk_window_close(GTK_WINDOW(dialog)); }); append(content, close);
+        g_signal_connect(viewer->documents, "notify::selected", G_CALLBACK(+[](GObject*, GParamSpec*, gpointer data) { static_cast<LegalViewer*>(data)->load(); }), viewer);
+        g_signal_connect(viewer->search, "search-changed", G_CALLBACK(+[](GtkSearchEntry*, gpointer data) { static_cast<LegalViewer*>(data)->find(); }), viewer);
+        g_signal_connect(viewer->search, "activate", G_CALLBACK(+[](GtkSearchEntry*, gpointer data) { static_cast<LegalViewer*>(data)->find(false, true); }), viewer);
+        g_signal_connect(viewer->search, "next-match", G_CALLBACK(+[](GtkSearchEntry*, gpointer data) { static_cast<LegalViewer*>(data)->find(false, true); }), viewer);
+        g_signal_connect(viewer->search, "previous-match", G_CALLBACK(+[](GtkSearchEntry*, gpointer data) { static_cast<LegalViewer*>(data)->find(true, true); }), viewer);
+        g_signal_connect(viewer->search, "stop-search", G_CALLBACK(+[](GtkSearchEntry* entry, gpointer data) {
+            if (*gtk_editable_get_text(GTK_EDITABLE(entry))) gtk_editable_set_text(GTK_EDITABLE(entry), "");
+            else gtk_window_close(GTK_WINDOW(static_cast<LegalViewer*>(data)->window));
+        }), viewer);
+        // These standard reader shortcuts remain local to this window.
+        auto* keys = gtk_event_controller_key_new();
+        g_signal_connect(keys, "key-pressed", G_CALLBACK(+[](GtkEventControllerKey*, guint key, guint, GdkModifierType modifiers, gpointer data) -> gboolean {
+            auto* self = static_cast<LegalViewer*>(data);
+            if ((modifiers & GDK_CONTROL_MASK) && (key == GDK_KEY_f || key == GDK_KEY_F)) { gtk_widget_grab_focus(self->search); return TRUE; }
+            if (key == GDK_KEY_Escape && !(modifiers & (GDK_CONTROL_MASK | GDK_ALT_MASK | GDK_SHIFT_MASK))) {
+                if (*gtk_editable_get_text(GTK_EDITABLE(self->search))) gtk_editable_set_text(GTK_EDITABLE(self->search), "");
+                else gtk_window_close(GTK_WINDOW(self->window));
+                return TRUE;
+            }
+            return FALSE;
+        }), viewer);
+        gtk_widget_add_controller(dialog, keys);
+        adw_window_set_content(ADW_WINDOW(dialog), outer); viewer->load(); return dialog;
+    }
+};
 class Desktop : public std::enable_shared_from_this<Desktop> {
     friend struct DesktopUiTest;
     AdwApplication* app_;
@@ -85,6 +215,7 @@ class Desktop : public std::enable_shared_from_this<Desktop> {
     GtkWidget *check_name_ = nullptr, *check_result_ = nullptr, *expected_ = nullptr, *algorithm_ = nullptr, *copy_hash_ = nullptr;
     GtkWidget *create_ = nullptr, *format_ = nullptr, *backup_ = nullptr, *scan_ = nullptr, *check_ = nullptr;
     GtkWidget *scheme_ = nullptr, *filesystem_ = nullptr, *volume_label_ = nullptr, *format_hint_ = nullptr, *activity_view_ = nullptr, *device_status_ = nullptr;
+    GtkWidget* legal_access_ = nullptr;
     GtkStringList* device_model_ = nullptr;
     std::vector<GtkWidget*> controls_, dropdowns_, device_details_, device_technical_, device_empty_, device_rows_;
     std::vector<Device> devices_;
@@ -705,6 +836,9 @@ class Desktop : public std::enable_shared_from_this<Desktop> {
         append(v, card("i", _("What this preview supports"), nullptr, &contents));
         append(contents, label(_("USB-ready Linux images and raw disk backups, full verification, formatting, backups, image checksums and read scans. Windows installer creation, persistent Linux storage, compressed images, fake-capacity tests and automatic image downloads are not available. Physical drive and boot testing, accessibility review and enterprise security qualification remain pending."), "card-caption"));
         append(v, note(_("Preview software, supplied without warranty. Storage operations can cause data loss. Keep backups and check the selected drive before confirming an erase."), true));
+        append(v, card("i", _("Legal & privacy"), _("Read the terms of use, privacy notice, disclaimer and open-source license. These documents are included in the app and work offline."), &contents));
+        legal_access_ = button(_("Read legal & privacy"), "secondary-button"); gtk_widget_set_halign(legal_access_, GTK_ALIGN_START);
+        click(legal_access_, [this] { gtk_window_present(GTK_WINDOW(LegalViewer::create(GTK_WINDOW(window_)))); }); append(contents, legal_access_);
     }
     void build_create() {
         auto* v = page("create"); append(v, hero(_("USB CREATION"), _("Create your bootable USB"), _("Put a Linux system image on a USB so you can try or install it on a computer.")));
@@ -783,7 +917,13 @@ class Desktop : public std::enable_shared_from_this<Desktop> {
         adw_about_window_set_application_icon(ADW_ABOUT_WINDOW(dialog), "org.kavrune.Kavrune"); adw_about_window_set_version(ADW_ABOUT_WINDOW(dialog), "0.1.0 Preview");
         adw_about_window_set_developer_name(ADW_ABOUT_WINDOW(dialog), _("Kavrune contributors")); adw_about_window_set_license_type(ADW_ABOUT_WINDOW(dialog), GTK_LICENSE_MIT_X11);
         adw_about_window_set_comments(ADW_ABOUT_WINDOW(dialog), _("An independent Linux-native media utility.\n\nPreview scope: raw hybrid images, mandatory readback verification, formatting, drive backup, checksums, and read-only scans.\n\nWindows installer creation, persistence, compressed images, fake-capacity testing and boot certification are not implemented in this preview. Hardware qualification and security review are required before enterprise deployment.\n\nOriginal project source and artwork are MIT licensed. Dependencies retain their respective licenses."));
-        gtk_window_set_transient_for(GTK_WINDOW(dialog), GTK_WINDOW(window_)); gtk_window_set_modal(GTK_WINDOW(dialog), TRUE); gtk_window_present(GTK_WINDOW(dialog));
+        adw_about_window_add_link(ADW_ABOUT_WINDOW(dialog), _("Terms, privacy and disclaimer"), "kavrune:legal");
+        g_signal_connect(dialog, "activate-link", G_CALLBACK(+[](AdwAboutWindow* parent, const char* uri, gpointer) -> gboolean {
+            if (std::string(uri) != "kavrune:legal") return FALSE;
+            gtk_window_present(GTK_WINDOW(LegalViewer::create(GTK_WINDOW(parent)))); return TRUE;
+        }), nullptr);
+        gtk_window_set_transient_for(GTK_WINDOW(dialog), GTK_WINDOW(window_)); gtk_window_set_destroy_with_parent(GTK_WINDOW(dialog), TRUE);
+        gtk_window_set_modal(GTK_WINDOW(dialog), TRUE); gtk_window_present(GTK_WINDOW(dialog));
     }
     void build_activity() {
         auto* v = page("activity"); append(v, hero(_("LOCAL HISTORY"), _("What happened in Kavrune"), _("See operation results and technical details. You can copy this activity when reporting a problem.")));

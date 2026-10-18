@@ -3,6 +3,12 @@ project(Kavrune VERSION 0.1.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+include(CheckPIESupported)
+check_pie_supported(LANGUAGES C CXX)
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  add_link_options(-Wl,-z,relro,-z,now,-z,noexecstack)
+endif()
 option(KAVRUNE_BUILD_DESKTOP "Build the GTK4 desktop application" ON)
 option(KAVRUNE_SANITIZERS "Enable address and undefined behavior sanitizers" OFF)
 include(GNUInstallDirs)
@@ -35,7 +41,11 @@ if(KAVRUNE_BUILD_DESKTOP)
     COMMAND ${GLIB_COMPILE_RESOURCES} ${CMAKE_CURRENT_SOURCE_DIR}/data/resources.xml
             --sourcedir=${CMAKE_CURRENT_SOURCE_DIR}/data --generate-source
             --target=${CMAKE_CURRENT_BINARY_DIR}/resources.c
-    DEPENDS data/resources.xml data/style.css data/icon.svg VERBATIM)
+    DEPENDS data/resources.xml data/style.css data/icon.svg TERMS.md PRIVACY.md DISCLAIMER.md LICENSE VERBATIM)
+  if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    # GResource generates a single byte string containing the offline notices.
+    set_source_files_properties(${CMAKE_CURRENT_BINARY_DIR}/resources.c PROPERTIES COMPILE_OPTIONS -Wno-overlength-strings)
+  endif()
   add_executable(kavrune src/desktop.cpp ${CMAKE_CURRENT_BINARY_DIR}/resources.c)
   target_link_libraries(kavrune PRIVATE kavrune-storage PkgConfig::GTK)
   target_compile_definitions(kavrune PRIVATE GETTEXT_PACKAGE="kavrune" KAVRUNE_VERSION="${PROJECT_VERSION}" KAVRUNE_LOCALE_DIR="${CMAKE_INSTALL_FULL_LOCALEDIR}")
@@ -46,7 +56,7 @@ if(KAVRUNE_BUILD_DESKTOP)
   install(FILES data/org.kavrune.Kavrune.metainfo.xml DESTINATION ${CMAKE_INSTALL_DATADIR}/metainfo)
 endif()
 install(TARGETS kavrune-cli RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-install(FILES LICENSE NOTICE README.md SECURITY.md DISCLAIMER.md CONTRIBUTING.md
+install(FILES LICENSE NOTICE README.md SECURITY.md TERMS.md PRIVACY.md DISCLAIMER.md CONTRIBUTING.md
   CODE_OF_CONDUCT.md SUPPORT.md CHANGELOG.md THIRD_PARTY_LICENSES.md
   DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/kavrune)
 install(DIRECTORY docs DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/kavrune)

@@ -13,6 +13,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <thread>
 #include <unistd.h>
@@ -779,6 +780,27 @@ void backup_and_scan_tests(const Temp& temp) {
     }, cancel); }, "cancel backup during destination replacement");
     check(get(partial) == std::vector<unsigned char>({'s', 'a', 'f', 'e'}), "cleanup preserves replacement inode");
     cancel = false;
+    const auto sync_destination = temp.file("sync-destination.img"), sync_preserved = temp.file("sync-preserved.img");
+    fails([&] { backup_image(source.fd, data.size(), sync_destination, [&](const Progress& p) {
+        if (p.stage == "Synchronizing") {
+            std::filesystem::rename(sync_destination, sync_preserved);
+            put(sync_destination, {'k', 'e', 'e', 'p'});
+        }
+    }, cancel); }, "backup destination replaced during synchronization cannot report success");
+    check(get(sync_destination) == std::vector<unsigned char>({'k', 'e', 'e', 'p'}), "synchronization cleanup preserves replacement inode");
+    check(get(sync_preserved) == data, "synchronization replacement leaves moved backup data intact");
+    const auto original_parent = temp.file("backup-folder"), moved_parent = temp.file("moved-backup-folder");
+    std::filesystem::create_directory(original_parent);
+    const auto folder_destination = original_parent / "saved.img";
+    fails([&] { backup_image(source.fd, data.size(), folder_destination, [&](const Progress& p) {
+        if (p.stage == "Synchronizing") {
+            std::filesystem::rename(original_parent, moved_parent);
+            std::filesystem::create_directory(original_parent);
+            put(folder_destination, {'k', 'e', 'e', 'p'});
+        }
+    }, cancel); }, "backup folder replaced during synchronization cannot report success for the original path");
+    check(get(folder_destination) == std::vector<unsigned char>({'k', 'e', 'e', 'p'}), "folder replacement cleanup preserves the new destination");
+    check(!std::filesystem::exists(moved_parent / "saved.img"), "folder replacement removes only the unfinished backup through the pinned parent");
     uint64_t scanned = 0;
     read_scan(source.fd, data.size(), [&](const Progress& p) { scanned = p.done; }, cancel);
     check(scanned == data.size() && get(source_path) == data, "read scan is complete and read only");
@@ -805,6 +827,27 @@ void log_and_utility_tests(const Temp& temp) {
     check(::stat((state / "kavrune").c_str(), &st) == 0 && (st.st_mode & 0777) == 0700, "log directory permissions");
     std::filesystem::remove(path); std::filesystem::create_symlink(temp.file("abc.img"), path);
     fails([&] { log_event("symlink log"); }, "log symlink rejected");
+    std::filesystem::remove(path);
+    check(::mkfifo(path.c_str(), 0600) == 0, "event log FIFO fixture");
+    fails([&] { log_event("FIFO without reader"); }, "event log FIFO cannot block without a reader");
+    {
+        Descriptor reader(path, O_RDONLY | O_NONBLOCK);
+        fails([&] { log_event("FIFO with reader"); }, "event log FIFO with a reader is rejected by type");
+    }
+    std::filesystem::remove(path);
+    log_event("regular logging still works");
+    check(get(path).size() > 0, "regular event log recreated after rejecting unsafe entries");
+    {
+        // flock locks belong to open file descriptions, so this independent
+        // descriptor reproduces a different process holding the log lock.
+        Descriptor locked(path, O_WRONLY);
+        check(::flock(locked.fd, LOCK_EX | LOCK_NB) == 0, "event log contention fixture holds exclusive lock");
+        fails([&] { log_event("contended log"); }, "event logging cannot block on another writer's lock");
+        check(::flock(locked.fd, LOCK_UN) == 0, "event log contention fixture releases lock");
+    }
+    log_event("logging resumes after contention");
+    const auto recovered_log = get(path);
+    check(std::count(recovered_log.begin(), recovered_log.end(), '\n') == 2, "logging recovers after contention without adding a failed record");
     if (prior) ::setenv("XDG_STATE_HOME", prior_value.c_str(), 1); else ::unsetenv("XDG_STATE_HOME");
 }
 

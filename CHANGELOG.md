@@ -2,6 +2,9 @@
 
 ## 0.1.0 — Unreleased development preview
 
+- Add Terms and Privacy notices and an offline Legal & privacy reader in Help/About with document switching, text selection, search, keyboard shortcuts and compact layouts; keep MIT rights and preview/warranty limits clear.
+- Prevent optional event logging from blocking on substituted FIFOs or a competing log writer, and reject backup destinations moved or replaced during saving before reporting success.
+- Verify new Debian packages by extraction without installation, including current guides/notices, embedded legal documents, executable hardening and the CLI safe self-test; add desktop metadata/package checks to CI and record the production audit.
 - Show five creation stages and animate blocking save/finalization steps with a spinner and elapsed-time updates. Keep overall progress below 100% until the operation finishes, retain the selected image/USB review while busy, and explain safe cancellation while buffered data is being saved.
 - Fix USB dropdowns showing a drive while the selected-target state remained empty. Add an explicit choice placeholder, synchronize drive selection across all four storage tools, preserve the same device across refreshes, and clear disconnected targets.
 - Show preparation and computer-boot instructions on Create USB before image selection, including that formatting first is unnecessary. Simplify Format USB around use and USB name, place partition options under Advanced settings, and explain invalid options before erase confirmation.

@@ -16,7 +16,7 @@ Writing an image, restoring a backup or formatting a drive permanently replaces 
 
 A checksum verifies byte consistency against a supplied value; it does not establish that an image is trustworthy, safe or bootable on your firmware. Obtain installation images from a source you trust. Use disposable media for preview evaluation and follow the documented safety limits.
 
-Kavrune runs through system UDisks2 and Polkit authorization. It does not include telemetry or upload images, drive contents or logs. Local activity logs can contain device identifiers and paths; review and redact them before sharing.
+Kavrune runs through system UDisks2 and Polkit authorization. It does not include telemetry or upload images, drive contents or logs. Local activity logs can contain device identifiers and paths; review and redact them before sharing. The [privacy notice](PRIVACY.md) explains local retention, deletion and clipboard handling. The [terms of use](TERMS.md) explain the preview's scope without adding restrictions to the MIT License.
 
 ## Independent project and dependencies
 
