@@ -4,6 +4,8 @@ Kavrune's implementation, documentation, stylesheet and SVG icon were created in
 
 Original project source, documentation and artwork are licensed under the [MIT License](../LICENSE), copyright 2026 Kavrune contributors. Keep the license and copyright notice when distributing copies or substantial portions of the project. Contributions are accepted under the same license unless an explicitly reviewed third-party component is documented separately.
 
+The [terms of use](../TERMS.md), [privacy notice](../PRIVACY.md) and [disclaimer](../DISCLAIMER.md) explain application behavior and limits. They do not require a separate click-through agreement or add conditions to the MIT grant. The canonical license follows the [Open Source Initiative's MIT text](https://opensource.org/license/mit).
+
 The application dynamically links system libraries and calls system services through their documented IPC interfaces. Those components keep their respective licenses; MIT licensing of the project does not relicense dependencies. See [third-party notices](../THIRD_PARTY_LICENSES.md).
 
 **Kavrune** is the project and application name; `org.kavrune.Kavrune` is its application identifier. Names of third-party dependencies identify their respective components only and do not imply endorsement.

@@ -1,4 +1,4 @@
-# Local validation — 14–17 October 2026
+# Local validation — 14–18 October 2026
 
 Build host: Ubuntu 26.04.1 LTS x86_64, GCC 15.2, GTK 4.22.4, libadwaita 1.9.1, GLib/GIO 2.88.0, OpenSSL 3.5.5. Build dependencies were extracted under `.deps` without system package installation. Agent-run write tests used temporary files; a later user-initiated physical USB trial is recorded separately below.
 
@@ -120,6 +120,21 @@ CTest now locates and uses a private X11/Xvfb session when the wrapper is availa
 `scripts/package.sh` passed all seven standard suites in **1.63 seconds** and rebuilt the Debian package and direct dependency SPDX inventory. Extraction without installation confirmed current executable build IDs and guides/notices, no RPATH/RUNPATH or privileged files, and a passing disposable-file CLI self-test with `physical_usb_tested: false`.
 
 A temporary preview harness rendered the saving stage on a private X11/Xvfb and D-Bus session with synthetic image/USB details, without starting discovery or a storage operation. The [saving-stage preview](progress-saving.png) shows the spinner, activity bar, step 3 of 5, elapsed time and retained selection review. The preview exited successfully and its private processes closed; no GTK warnings or criticals were reported, only headless graphics/session diagnostics.
+
+## Production audit and legal/privacy update — 18 October 2026
+
+The [production audit](PRODUCTION_AUDIT.md) records scope, addressed findings and remaining release gates. Terms and Privacy were added; all four legal documents are packaged and embedded in an offline reader available from How to use and About. The notices preserve the MIT License and explain actual local processing and persistent log retention without claiming legal certification.
+
+- Four concrete cases were fixed: a substituted FIFO blocking log open, a contended log lock blocking the UI, and a backup file or its parent folder being replaced during synchronization while the original selected path could incorrectly be reported as successful. Fourteen new core assertions reproduce these cases and verify recovery/replacement-safe cleanup.
+- The completed build passed all **seven standard CTest suites in 1.79 seconds** and all **seven AddressSanitizer/UndefinedBehaviorSanitizer suites in 4.08 seconds**. Coverage is **208 core + 122 storage + 329 GTK selection + 100 desktop-workflow assertions = 759 checks**. No new compiler warnings were reported. Leak detection is disabled only for GTK's process-wide caches; core and storage leak checks remain enabled.
+- Twenty new hidden desktop checks cover the legal resources and reader: complete notice text, document switching, case-insensitive search, next/previous and absent matches, clearing search, and closing the reader without changing an active operation's selection, ID or cancellation state.
+- Private X11/Xvfb and D-Bus visual checks covered the reader at 700×600 and 420×600 in light and dark themes, plus the actual About-to-reader link. No discovery or storage operation was invoked. The [wide](legal-privacy.png) and [compact](legal-privacy-small.png) captures show the dark-theme reader. No application GTK warning or critical was reported; private-session graphics/portal diagnostics remain expected.
+- AppStream validation without network access and desktop-entry validation passed. The AppStream mixed-case application-ID pedantic hint remains; it is not a validation failure. Shell syntax, Python compilation, local documentation links and repository publication checks passed.
+- `scripts/package.sh` rebuilt the Debian package and direct runtime SPDX inventory, then extracted the new archive without installing it. The new automatic gate verified current notices/guides/metadata, byte-identical embedded legal documents, safe file permissions, no setuid/setgid or RPATH/RUNPATH entries, and PIE/RELRO/BIND_NOW/non-executable-stack hardening. Payload archive owner/group IDs were separately confirmed as root/root. The extracted CLI's disposable-file JSON self-test passed with `physical_usb_tested: false`.
+- A disposable repacked archive with `PRIVACY.md` deliberately removed was rejected by the gate. The original artifact remained unchanged. Package validation checks only archives created in the current run, avoiding failures caused by unrelated older artifacts in `dist/`.
+- The synthetic 4 MiB BIOS test passed again using local QEMU 10.2.1/SeaBIOS. The CLI wrote and verified a temporary regular file, the guest emitted `KAVRUNE_BOOT_OK` with expected exit status 33, and the backing file remained unchanged. This is not a real Linux distribution, UEFI or physical USB boot result.
+
+No system package installation or physical USB operation was performed for this audit. New hosted CI metadata/package checks are configured; a successful hosted run for the final audit revision has not been observed here. The app remains a development preview with hardware, firmware, distribution, accessibility, independent security, complete dependency/SBOM and operational release qualification outstanding.
 
 ## Published revision CI
 

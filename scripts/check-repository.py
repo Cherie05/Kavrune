@@ -33,13 +33,16 @@ REQUIRED = {
     "DISCLAIMER.md",
     "LICENSE",
     "NOTICE",
+    "PRIVACY.md",
     "README.md",
     "SECURITY.md",
     "SUPPORT.md",
+    "TERMS.md",
     "THIRD_PARTY_LICENSES.md",
     "data/org.kavrune.Kavrune.desktop",
     "data/org.kavrune.Kavrune.metainfo.xml",
     "scripts/check-repository.py",
+    "scripts/check-package.py",
 }
 
 GENERATED_SUFFIXES = {

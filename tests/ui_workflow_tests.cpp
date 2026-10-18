@@ -15,6 +15,64 @@ bool enabled(GtkWidget* widget) { return gtk_widget_get_sensitive(widget); }
 std::string text(GtkWidget* widget) { return gtk_label_get_text(GTK_LABEL(widget)); }
 
 struct DesktopUiTest {
+    static void legal_regressions(Desktop& ui) {
+        workflow_check(enabled(ui.legal_access_), "legal and privacy documents are available without starting an operation");
+        const auto source = ui.image_.path;
+        const auto selected = ui.selected_;
+        const auto operation = ui.operation_id_;
+        ui.busy_ = true; ui.update_controls();
+        workflow_check(enabled(ui.legal_access_), "legal and privacy access remains available during another operation");
+        auto* window = LegalViewer::create(GTK_WINDOW(ui.window_));
+        struct LegalCleanup { GtkWidget* window; ~LegalCleanup() { if (window) gtk_window_destroy(GTK_WINDOW(window)); } } cleanup{window};
+        auto* reader = static_cast<LegalViewer*>(g_object_get_data(G_OBJECT(window), "kavrune-legal-viewer"));
+        workflow_check(reader && !gtk_widget_get_visible(window), "the real legal reader can be constructed without showing a window");
+        workflow_check(!gtk_text_view_get_editable(GTK_TEXT_VIEW(reader->body)) &&
+                       gtk_text_view_get_wrap_mode(GTK_TEXT_VIEW(reader->body)) == GTK_WRAP_WORD_CHAR,
+                       "legal text is read-only, selectable, and wraps on a compact screen");
+        auto* buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(reader->body));
+        for (unsigned i = 0; i < G_N_ELEMENTS(LegalViewer::filenames); ++i) {
+            gtk_drop_down_set_selected(GTK_DROP_DOWN(reader->documents), i);
+            const std::string path = std::string("/org/kavrune/Kavrune/legal/") + LegalViewer::filenames[i];
+            GError* error = nullptr;
+            GBytes* bytes = g_resources_lookup_data(path.c_str(), G_RESOURCE_LOOKUP_FLAGS_NONE, &error);
+            workflow_check(bytes != nullptr && error == nullptr, "each complete legal document is embedded for offline access");
+            gsize size = 0; const auto* data = static_cast<const char*>(g_bytes_get_data(bytes, &size));
+            GtkTextIter first, last; gtk_text_buffer_get_bounds(buffer, &first, &last);
+            gchar* shown = gtk_text_buffer_get_text(buffer, &first, &last, FALSE);
+            const bool same = std::string(shown) == std::string(data, size);
+            g_free(shown); g_bytes_unref(bytes); g_clear_error(&error);
+            workflow_check(same && size > 200, "switching documents displays the complete packaged source text");
+        }
+        gtk_editable_set_text(GTK_EDITABLE(reader->search), "sOfTwArE"); reader->find();
+        GtkTextIter first_match, last_match;
+        workflow_check(gtk_text_buffer_get_selection_bounds(buffer, &first_match, &last_match),
+                       "document search selects a case-insensitive match in the MIT license");
+        const int match_offset = gtk_text_iter_get_offset(&first_match);
+        reader->find(false, true);
+        workflow_check(gtk_text_buffer_get_selection_bounds(buffer, &first_match, &last_match) &&
+                       gtk_text_iter_get_offset(&first_match) != match_offset,
+                       "next-match search advances to another occurrence");
+        reader->find(true, true);
+        workflow_check(gtk_text_buffer_get_selection_bounds(buffer, &first_match, &last_match) &&
+                       gtk_text_iter_get_offset(&first_match) == match_offset,
+                       "previous-match search returns to the earlier occurrence");
+        gtk_editable_set_text(GTK_EDITABLE(reader->search), "kavrune-query-that-is-not-in-any-document"); reader->find();
+        workflow_check(!gtk_text_buffer_get_selection_bounds(buffer, &first_match, &last_match) &&
+                       text(reader->status).find("No matching text") != std::string::npos,
+                       "a missing search result has a clear visible explanation");
+        gtk_editable_set_text(GTK_EDITABLE(reader->search), ""); reader->find();
+        workflow_check(text(reader->status).find("offline") != std::string::npos,
+                       "clearing search restores offline reading guidance");
+        workflow_check(ui.busy_ && ui.image_.path == source && ui.selected_ == selected && ui.operation_id_ == operation,
+                       "opening and reading legal documents never changes the active operation or selected media");
+        gtk_editable_set_text(GTK_EDITABLE(reader->search), "software");
+        g_signal_emit_by_name(reader->search, "stop-search");
+        workflow_check(!*gtk_editable_get_text(GTK_EDITABLE(reader->search)), "Escape clears a document search before closing the reader");
+        gtk_window_destroy(GTK_WINDOW(window)); cleanup.window = nullptr;
+        workflow_check(ui.busy_ && ui.operation_id_ == operation && !ui.cancel_->load(),
+                       "closing the legal reader leaves an active operation running");
+        ui.busy_ = false; ui.update_controls();
+    }
     static void progress_regressions(Desktop& ui) {
         const uint64_t bytes = 8 * 1024 * 1024;
         ui.busy_ = true;
@@ -224,6 +282,7 @@ struct DesktopUiTest {
                        "resetting a source does not discard the selected physical USB");
         workflow_check(!enabled(ui.copy_hash_), "resetting a source removes the previous checksum copy action");
         progress_regressions(ui);
+        legal_regressions(ui);
         workflow_check(!gtk_widget_get_visible(ui.window_), "functional regression never opens a visible app window");
     }
 };

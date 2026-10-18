@@ -45,7 +45,11 @@ jobs:
           sudo apt-get install --no-install-recommends -y \
             build-essential cmake pkg-config libgtk-4-dev libadwaita-1-dev \
             libssl-dev libglib2.0-dev-bin xvfb xauth dbus-x11 \
-            qemu-system-x86 seabios dpkg-dev file
+            qemu-system-x86 seabios dpkg-dev file appstream desktop-file-utils
+      - name: Desktop metadata
+        run: |
+          desktop-file-validate data/org.kavrune.Kavrune.desktop
+          appstreamcli validate --no-net data/org.kavrune.Kavrune.metainfo.xml
       - name: Configure C++20 build
         run: >-
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
@@ -60,11 +64,18 @@ jobs:
         env:
           GTK_A11Y: none
           GSETTINGS_BACKEND: memory
+          GDK_BACKEND: x11
         run: dbus-run-session -- xvfb-run -a ./build/kavrune --smoke-test
       - name: Build development Debian package
         if: matrix.sanitizers == 'OFF'
         working-directory: build
         run: cpack -G DEB
+      - name: Verify extracted package and offline notices
+        if: matrix.sanitizers == 'OFF'
+        run: |
+          for package in build/*.deb; do
+            python3 scripts/check-package.py "$package" --self-test
+          done
       - name: Upload development package
         if: matrix.sanitizers == 'OFF'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

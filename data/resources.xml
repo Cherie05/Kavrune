@@ -1,2 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<gresources><gresource prefix="/org/kavrune/Kavrune"><file>style.css</file><file>icon.svg</file></gresource></gresources>
+<gresources>
+  <gresource prefix="/org/kavrune/Kavrune">
+    <file>style.css</file>
+    <file>icon.svg</file>
+    <file alias="legal/TERMS.md">../TERMS.md</file>
+    <file alias="legal/PRIVACY.md">../PRIVACY.md</file>
+    <file alias="legal/DISCLAIMER.md">../DISCLAIMER.md</file>
+    <file alias="legal/LICENSE">../LICENSE</file>
+  </gresource>
+</gresources>

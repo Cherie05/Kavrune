@@ -58,7 +58,7 @@ Readback verification cannot promise boot compatibility. To check that, restart 
 - **Check download:** calculate a file fingerprint and optionally compare it with the publisher's value. Choose SHA-256 for a new comparison. The result and copy button identify the algorithm actually calculated; choosing another algorithm does not recalculate until you click **Calculate and compare**.
 - **Check USB:** read the drive for unreadable areas without writing data. It may take a long time and unmounts the drive. Reopen it in your file manager afterward. A passed read test does not prove genuine capacity, write reliability, or future health.
 - **Activity:** review progress and error details. Device identifiers and local paths may appear; review them before sharing a log.
-- **How to use:** open the in-app steps and feature limits.
+- **How to use:** open the in-app steps and feature limits. **Legal & privacy** opens searchable Terms, Privacy, Disclaimer and MIT License documents, available without internet access. The same reader is linked from **About Kavrune**.
 
 If no USB is offered, check that it is connected and click **Refresh**. Open **Activity** to read why a drive is protected or unsupported. If authentication or the storage service is unavailable, use a normal Linux desktop session with UDisks2 and a password prompt agent. From a source checkout, rebuild with `./scripts/build.sh` after changes, then launch again.
 
@@ -69,5 +69,11 @@ Read the app's next step: finish an incomplete download, extract an archive, con
 To diagnose a completed download, open **Check download**, choose the file there, and compare it with the publisher's SHA-256. This also works for complete files whose format or structure the USB creator cannot accept. A **Checksum only** selection keeps creation disabled. A matching hash does not add USB support or prove the image will boot; if it matches but is still refused, follow the publisher's preparation instructions. Unfinished `.part` and similar downloads remain blocked. See the [compatibility guide](IMAGE_COMPATIBILITY.md) for message meanings and supported profiles.
 
 After an app update or source rebuild, close Kavrune completely and reopen it so the new image checks are loaded.
+
+## Privacy and notices
+
+Open **How to use → Legal & privacy**, then choose a document. Use **Ctrl+F** to search, **Enter** or the arrows to move between matches, and **Close** to return. Reading the notices does not approve or start a drive operation.
+
+Kavrune has no telemetry or automatic uploads. Activity records are local and can include paths, device identifiers and checksums. They persist until removed; the [privacy notice](../PRIVACY.md) explains deletion after finishing operations and closing the app. Review copied activity before sharing it. See the [terms](../TERMS.md), [disclaimer](../DISCLAIMER.md), and [MIT License](../LICENSE) for preview, storage and warranty information.
 
 Use the [USB test checklist](USER_TEST_CHECKLIST.md) to record the results of each tool and the separate boot test. See [what is implemented and pending](FEATURE_STATUS.md), [recorded checks](BUILD_RESULTS.md), and the [production validation requirements](VALIDATION.md).
