@@ -1,5 +1,19 @@
 # Publish Kavrune to GitHub
 
+## Published preview and hosted setup
+
+[Kavrune 0.1.0 Preview 1](https://github.com/Cherie05/Kavrune/releases/tag/v0.1.0-preview.1) was published on 26 October 2026 from commit `b30f1612c9b56fe2b945da35ba164597e7e7903e`. Its Ubuntu 24.04 amd64 package comes from [successful CI run 40267821785](https://github.com/Cherie05/Kavrune/actions/runs/40267821785). The release includes the installer, exact-commit source, original CI manifest, scoped SPDX inventory, offline report, original CI checksums and complete release checksums/provenance. Checksums and provenance are unsigned; publisher-key signing remains separate work.
+
+The official repository is public. Its About description, release homepage and topics are configured. Private vulnerability reporting, dependency alerts/security updates, secret scanning and secret push protection were verified enabled. These hosted settings can change; check their actual state rather than assuming a copied configuration enables them.
+
+The protected `main` branch requires a pull request, resolved review conversations and current successful `Repository hygiene`, `Linux (sanitizers OFF)` and `Linux (sanitizers ON)` checks from GitHub Actions. Protection applies to administrators, with zero mandatory approvals so a sole maintainer can merge their own tested PR. Force pushes and branch deletion are blocked. Publish subsequent source changes through a branch and PR; the direct-push command below applies only where repository policy permits it.
+
+Version tags matching `v*` are protected against updates and deletion. Publish a new version instead of moving an existing release tag. Automatic deletion of merged branches and the PR branch-update control are enabled. Existing issue/PR templates, MIT, conduct, contribution and security files remain available. No paid service or signing identity was created.
+
+The release is explicitly a pre-release. Passing CI and configuring GitHub do not complete the physical-media, clean-install, accessibility, independent security, dependency/license or enterprise support acceptance matrix.
+
+## Repository location
+
 The project repository is [Cherie05/Kavrune](https://github.com/Cherie05/Kavrune). This checkout is on `main`, with `origin` configured as `https://github.com/Cherie05/Kavrune.git`. The application remains a 0.1 development preview after publication. A configured remote does not mean every local change has been pushed or that hosted security settings have been enabled.
 
 ## Update the existing repository
