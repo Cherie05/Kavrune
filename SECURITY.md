@@ -11,13 +11,13 @@ Kavrune has no stable release, dedicated security team or response-time SLA. Pro
 
 ## Reporting a vulnerability
 
-If GitHub private vulnerability reporting is enabled for the published repository, open its **Security** tab and choose **Report a vulnerability**. Submit your report privately there. If the feature is unavailable, use a private security contact published by the repository maintainer. This checkout does not establish an email address or hosted reporting endpoint.
+The official repository has [private vulnerability reporting](https://github.com/Cherie05/Kavrune/security/advisories/new) enabled. Open its **Security** tab and choose **Report a vulnerability**, or use that link to submit your report privately. This hosted setting was verified on 26 October 2026. Forks must configure their own reporting channel; a copied policy does not enable the feature.
 
 If no private channel is listed, ask the maintainer to provide one without posting exploit details, credentials, disk contents or personal information in a public issue. Describe the affected version or commit, distribution, observed behavior, impact and safe reproduction steps using synthetic files or a disposable VM. Include device identifiers only when necessary and redact personal details from logs.
 
 Give maintainers a reasonable opportunity to investigate and coordinate a fix before public disclosure. Reports are reviewed on a best-effort basis; do not run destructive demonstrations against another person's devices or data.
 
-Repository owners should enable [GitHub private vulnerability reporting](https://docs.github.com/en/code-security/how-tos/report-and-fix-vulnerabilities/configure-vulnerability-reporting/configure-for-a-repository) and publish a working fallback private contact before inviting security reports. These settings are separate from the files in this checkout.
+If GitHub's reporting service is unavailable, ask the maintainer for an alternative private channel without sharing sensitive details. No fallback email address or response-time commitment is established. Instructions for repository owners are in [GitHub's private reporting guide](https://docs.github.com/en/code-security/how-tos/report-and-fix-vulnerabilities/configure-vulnerability-reporting/configure-for-a-repository).
 
 ## Storage safety model
 

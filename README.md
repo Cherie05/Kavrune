@@ -10,6 +10,19 @@ Read the [terms of use](TERMS.md) and [privacy notice](PRIVACY.md). The app incl
 
 ![Kavrune native desktop preview](docs/preview.png)
 
+## Download and install the preview
+
+Download the `.deb` installer from [Kavrune releases](https://github.com/Cherie05/Kavrune/releases). Preview 1 uses the Ubuntu 24.04 x86_64/amd64 build from GitHub Actions. Linux Mint 22.x is a compatibility target; real package-manager installation and physical USB acceptance remain pending. Other architectures and RPM, Flatpak and AppImage downloads are not provided.
+
+Download the release's matching `SHA256SUMS` and supporting assets to verify the complete set with `sha256sum --check SHA256SUMS`. The release notes identify the exact source commit, CI run, artifact provenance and signing limitations. Then, from the download directory:
+
+```sh
+sudo apt install ./kavrune_0.1.0_amd64.deb
+kavrune
+```
+
+Installation may need internet to obtain distribution dependencies. Local application operations work offline after installation. Run Kavrune as your ordinary desktop user. A verified temporary-file test is separate from an actual USB or firmware boot test.
+
 ## Start the application
 
 If the desktop package is installed, open **Kavrune** from your application menu. From this source checkout:

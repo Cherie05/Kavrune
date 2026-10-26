@@ -169,6 +169,8 @@ No attached pendrive was written, formatted, mounted or unmounted. Only generate
 
 ## Published revision CI
 
+[GitHub Actions run 40266870341](https://github.com/Cherie05/Kavrune/actions/runs/40266870341) completed successfully for commit `5ad57a7107bb387e3d1f426c07b3214708077d6c` on 26 October 2026. Both Ubuntu 24.04 builds passed all **nine CTest suites**, including the synthetic BIOS test, with sanitizers off and on. Repository hygiene, desktop metadata, desktop smoke, Debian packaging, extracted-package lifecycle/offline checks and artifact upload also passed. The downloadable CI artifact records a clean source fingerprint for that commit. This is hosted evidence for that exact revision; the release notes identify the run used for each published artifact.
+
 [GitHub Actions run 38540398428](https://github.com/Cherie05/Kavrune/actions/runs/38540398428) completed successfully for commit `29b3875073378c28a4ff0c6421b825f066e0fe7c`, created on 14 October 2026 at 14:40 IST. This is evidence for that published revision. Subsequent beginner UI, safe self-test, storage-protection and image-compatibility changes require their own CI run after publication; the earlier green run does not validate those changes.
 
 Reproduce release/file tests with `scripts/build.sh`, optional synthetic boot with `scripts/test-boot.sh build/kavrune-cli`, and packaging with `scripts/package.sh`. For a sanitizer build, configure a separate build directory with `-DKAVRUNE_SANITIZERS=ON`. Refer to `VALIDATION.md` for the outstanding release gates.
