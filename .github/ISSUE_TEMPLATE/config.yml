@@ -1,1 +1,8 @@
 blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability privately
+    url: https://github.com/Cherie05/Kavrune/security/advisories/new
+    about: Use private reporting for protection bypasses, privilege escalation and malicious-image vulnerabilities. Do not post exploit details in public issues.
+  - name: Read the beginner guide
+    url: https://github.com/Cherie05/Kavrune/blob/main/docs/GETTING_STARTED.md
+    about: Follow the preparation, writing, verification and boot instructions before your first USB trial.

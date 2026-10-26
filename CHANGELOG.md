@@ -2,6 +2,7 @@
 
 ## 0.1.0 — Unreleased development preview
 
+- Add release download/install guidance and direct links to the official repository's enabled private vulnerability reporting channel.
 - Keep the application alive until background drive discovery returns, including after closing the last window, to prevent shutdown from racing storage cleanup. Test successful and failed discovery against the actual application loop with synthetic metadata.
 - Apply the complete desktop checklist through permanent product requirements/standards, architecture, privacy/legal inventory, test and release plans, and an assessment of all 25 sections and 24 release gates.
 - Add bounded UTC/severity diagnostic history, safe reload/export/confirmed clearing in Activity and CLI, current-version reports, Unicode/control sanitization and interprocess safety tests. Synchronize privacy notices with size retention and user data controls.
