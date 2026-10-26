@@ -99,11 +99,11 @@ jobs:
         run: |
           python3 scripts/prepare-ppa.py --maintainer-name 'Kavrune CI Fixture' --maintainer-email packaging@example.invalid --output build/ppa-validation
           cd build/ppa-validation/kavrune-*
-          dpkg-buildpackage -S -sa -us -uc
+          dpkg-buildpackage -S -sa --no-sign
           cd ..
           dpkg-source --no-check -x ./*.dsc roundtrip
           cd roundtrip
-          DEB_BUILD_OPTIONS=parallel=2 dpkg-buildpackage -b -us -uc
+          DEB_BUILD_OPTIONS=parallel=2 dpkg-buildpackage -b --no-sign
           cd ../../..
           python3 scripts/check-package.py build/ppa-validation/kavrune_*_amd64.deb --debian-revision 0ubuntu1~beta1~noble1 --self-test --offline --report build/ppa-validation/offline-report.json
       - name: Upload development package

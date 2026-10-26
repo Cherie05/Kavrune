@@ -133,8 +133,11 @@ class SourcePackaging(unittest.TestCase):
         self.assertIsNotNone(shutil.which("dpkg-buildpackage"), "dpkg-dev is required; do not silently skip packaging acceptance")
         report = self.prepare()
         source = self.output / report["source_directory"]
-        completed = subprocess.run(["dpkg-buildpackage", "-S", "-sa", "-nc", "-us", "-uc"], cwd=source,
-                                   text=True, capture_output=True, timeout=60)
+        try:
+            completed = subprocess.run(["dpkg-buildpackage", "-S", "-sa", "-nc", "--no-sign"], cwd=source,
+                                       text=True, capture_output=True, timeout=60)
+        except subprocess.TimeoutExpired as error:
+            self.fail(f"Unsigned source fixture timed out. Partial stdout: {error.stdout!r}; stderr: {error.stderr!r}")
         self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
         dsc = next(self.output.glob("*.dsc"))
         extracted = self.base / "extracted"
