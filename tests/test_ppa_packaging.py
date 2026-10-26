@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: MIT
 """Exercise real Git exports and dpkg source round trips in temporary files."""
 import importlib.util
+from email.parser import Parser
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -130,26 +132,51 @@ class SourcePackaging(unittest.TestCase):
             subprocess.run(["dpkg", "--compare-versions", left, "lt", right], check=True)
 
     def test_real_source_package_build_and_extraction(self):
-        self.assertIsNotNone(shutil.which("dpkg-buildpackage"), "dpkg-dev is required; do not silently skip packaging acceptance")
+        self.assertIsNotNone(shutil.which("dpkg-source"), "dpkg-dev is required; do not silently skip packaging acceptance")
         report = self.prepare()
         source = self.output / report["source_directory"]
         try:
-            completed = subprocess.run(["dpkg-buildpackage", "-S", "-sa", "-nc", "--no-sign"], cwd=source,
+            # Exercise source serialization directly. Full dpkg-buildpackage source
+            # and binary builds have a separate Ubuntu CI gate; its host-wide
+            # buildinfo dependency inventory is outside this fixture's scope.
+            completed = subprocess.run(["dpkg-source", "-b", source.name], cwd=self.output,
                                        text=True, capture_output=True, timeout=60)
         except subprocess.TimeoutExpired as error:
             self.fail(f"Unsigned source fixture timed out. Partial stdout: {error.stdout!r}; stderr: {error.stderr!r}")
         self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
-        dsc = next(self.output.glob("*.dsc"))
+        descriptors = list(self.output.glob("*.dsc"))
+        self.assertEqual(len(descriptors), 1)
+        dsc = descriptors[0]
+        descriptor_text = dsc.read_text()
+        descriptor = Parser().parsestr(descriptor_text)
+        self.assertEqual(descriptor["Format"], "3.0 (quilt)")
+        self.assertEqual(descriptor["Source"], "kavrune")
+        self.assertEqual(descriptor["Version"], report["package_version"])
+        self.assertEqual(descriptor["Architecture"], "amd64")
+        debian_archives = list(self.output.glob("*.debian.tar.*"))
+        self.assertEqual(len(debian_archives), 1)
+        listed_archives = set()
+        for line in descriptor["Checksums-Sha256"].splitlines():
+            if not line.strip():
+                continue
+            digest, size, name = line.split()
+            archive = self.output / name
+            self.assertEqual(archive.name, name)
+            self.assertEqual(archive.stat().st_size, int(size))
+            self.assertEqual(hashlib.sha256(archive.read_bytes()).hexdigest(), digest)
+            listed_archives.add(name)
+        self.assertEqual(listed_archives, {report["orig_archive"], debian_archives[0].name})
+        self.assertNotIn("BEGIN PGP", descriptor_text)
         extracted = self.base / "extracted"
         completed = subprocess.run(["dpkg-source", "--no-check", "-x", str(dsc), str(extracted)],
                                    text=True, capture_output=True, timeout=30)
         self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
         for name in ("LICENSE", "CMakeLists.txt", "script.sh", "debian/control", "debian/changelog", "debian/rules"):
             self.assertEqual((source / name).read_bytes(), (extracted / name).read_bytes())
-        changes = next(self.output.glob("*_source.changes")).read_text()
-        self.assertIn("Architecture: source", changes)
-        self.assertIn(report["orig_archive"], changes)
-        self.assertNotIn("BEGIN PGP SIGNATURE", changes)
+            # dpkg-source can normalize write permissions according to umask;
+            # executable and non-executable files must retain their distinction.
+            self.assertEqual((source / name).stat().st_mode & 0o111,
+                             (extracted / name).stat().st_mode & 0o111)
         self.assertFalse(json.loads((self.output / "ppa-preparation.json").read_text())["uploaded"])
 
     def test_binary_checker_requires_exact_upstream_and_explicit_revision(self):
