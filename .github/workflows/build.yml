@@ -22,8 +22,11 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
+      - name: Test publication identity checks
+        run: python3 tests/test_repository_privacy.py
       - name: Check publishable source
-        run: python3 scripts/check-repository.py --staged
+        run: python3 scripts/check-repository.py --staged --history
 
   linux:
     name: Linux (sanitizers ${{ matrix.sanitizers }})

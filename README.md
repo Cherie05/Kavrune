@@ -16,7 +16,7 @@ Users do not need Git, a compiler or a GitHub account. Follow [INSTALL.md](INSTA
 
 Download the `.deb` installer from [Kavrune 0.1.0 Preview 1](https://github.com/Cherie05/Kavrune/releases/tag/v0.1.0-preview.1). Preview 1 uses the Ubuntu 24.04 x86_64/amd64 build from GitHub Actions. Linux Mint 22.x is a compatibility target; real package-manager installation and physical USB acceptance remain pending. Other architectures and RPM, Flatpak and AppImage downloads are not provided.
 
-Download the release's matching `SHA256SUMS` and supporting assets to verify the complete set with `sha256sum --check SHA256SUMS`. The release notes identify the exact source commit, CI run, artifact provenance and signing limitations. Then, from the download directory:
+Download the release's matching `SHA256SUMS` and supporting assets to verify the original release artifact set with `sha256sum --check SHA256SUMS`. Optional history/evidence supplements use their separate `PRIVACY_SHA256SUMS`. The release notes explain canonical source, archived CI evidence, the metadata-only history normalization and signing limitations. Then, from the download directory:
 
 ```sh
 sudo apt install ./kavrune_0.1.0_amd64.deb

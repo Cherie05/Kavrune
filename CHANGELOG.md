@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Normalize canonical Git identity metadata with maintainer approval while preserving every file tree and original preview artifact bytes. Add a full-history publication check for both author and committer noreply emails, eight disposable-Git regressions and privacy/re-clone guidance. Legacy GitHub PR/cache references need separate platform handling.
+
 - Make beta/development status and possible data loss, broken media and device/system damage explicit in project notices while preserving the MIT license and applicable-law qualifications. Add a user installation, verification, safe-test, update and removal guide; keep PPA setup deferred.
 - Align contributor publishing instructions with protected-branch PR requirements and extend ignored local credential/crash files.
 - Use the GitHub runner's existing Ubuntu HTTPS archive fallbacks with APT download timeouts/retries after observing very slow Azure HTTP dependency downloads. Keep archive signature verification and all required tests enabled.

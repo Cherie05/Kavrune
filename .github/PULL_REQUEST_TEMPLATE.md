@@ -21,5 +21,6 @@ operations, cancellation, or verification. Write "None" when these do not change
 - [ ] The change preserves protected-device checks and destructive-operation confirmation.
 - [ ] Automated tests use temporary regular files; no physical storage device was required.
 - [ ] No generated packages, local dependencies, personal data, credentials, or private paths are included.
+- [ ] Both author and committer use GitHub noreply identities; the complete HEAD history check passed.
 
 Do not disclose a vulnerability in a public pull request. Follow SECURITY.md.
