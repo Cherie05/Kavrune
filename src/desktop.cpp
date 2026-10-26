@@ -637,16 +637,22 @@ class Desktop : public std::enable_shared_from_this<Desktop> {
         auto* dialog = adw_message_dialog_new(GTK_WINDOW(window_), title, detail.c_str());
         adw_message_dialog_add_response(ADW_MESSAGE_DIALOG(dialog), "close", _("Close")); adw_message_dialog_set_close_response(ADW_MESSAGE_DIALOG(dialog), "close"); gtk_window_present(GTK_WINDOW(dialog));
     }
-    void refresh_devices() {
+    using DeviceQuery = std::function<std::vector<Device>()>;
+    void refresh_devices(DeviceQuery query = [] { Storage storage; return storage.devices(); }) {
         if (refreshing_ || busy_ || !alive_) return;
         refreshing_ = true;
         auto self = shared_from_this();
-        try { std::thread([self] {
+        // A closed window must not let process/static teardown race the
+        // storage worker. Release the hold on GTK's thread after discovery,
+        // including errors and results discarded because the window closed.
+        g_application_hold(G_APPLICATION(app_));
+        try { std::thread([self, query = std::move(query)] {
             std::vector<Device> found; std::string error;
-            try { Storage storage; found = storage.devices(); } catch (const std::exception& e) { error = e.what(); }
+            try { found = query(); } catch (const std::exception& e) { error = e.what(); }
             self->post([self, found = std::move(found), error] {
-                if (!self->alive_) return;
                 self->refreshing_ = false;
+                g_application_release(G_APPLICATION(self->app_));
+                if (!self->alive_) return;
                 // A polling response cannot change the immutable target of an operation.
                 if (self->busy_) return;
                 std::string discovery_report;
@@ -677,7 +683,10 @@ class Desktop : public std::enable_shared_from_this<Desktop> {
                 self->sync_selection(); self->update_controls();
             });
         }).detach(); }
-        catch (const std::exception& error) { refreshing_ = false; record(std::string(_("Could not start drive discovery: ")) + error.what()); }
+        catch (const std::exception& error) {
+            refreshing_ = false; g_application_release(G_APPLICATION(app_));
+            record(std::string(_("Could not start drive discovery: ")) + error.what());
+        }
     }
     using Work = std::function<std::string(const ProgressFn&, const std::atomic_bool&)>;
     using Failure = std::function<void(const std::string&, const std::string&)>;

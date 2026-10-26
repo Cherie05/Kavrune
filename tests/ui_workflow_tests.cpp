@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Exercise the actual desktop control logic with synthetic data. The window is
-// constructed but never presented; no discovery, disk operation or dialog runs.
+// constructed but never presented; discovery is synthetic and no disk is opened.
 #define KAVRUNE_DESKTOP_TEST
 #include "../src/desktop.cpp"
 #include <fstream>
@@ -16,6 +16,72 @@ bool enabled(GtkWidget* widget) { return gtk_widget_get_sensitive(widget); }
 std::string text(GtkWidget* widget) { return gtk_label_get_text(GTK_LABEL(widget)); }
 
 struct DesktopUiTest {
+    static void discovery_shutdown_regressions() {
+        for (const bool fail_query : {false, true}) {
+            struct Scenario {
+                std::shared_ptr<Desktop> desktop;
+                std::atomic_bool started{false}, release{false}, finished{false};
+                bool closed = false, timed_out = false, fail_query = false;
+                guint close_source = 0, release_source = 0, deadline_source = 0;
+            } scenario;
+            scenario.fail_query = fail_query;
+            auto* application = adw_application_new("org.kavrune.DiscoveryShutdownTests", G_APPLICATION_NON_UNIQUE);
+            g_signal_connect(application, "activate", G_CALLBACK(+[](GApplication* app, gpointer data) {
+                auto* state = static_cast<Scenario*>(data);
+                state->desktop = std::make_shared<Desktop>(ADW_APPLICATION(app));
+                state->desktop->refresh_devices([state] {
+                    state->started.store(true);
+                    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+                    while (!state->release.load() && std::chrono::steady_clock::now() < deadline) g_usleep(1000);
+                    state->finished.store(true);
+                    if (state->fail_query) throw std::runtime_error("Synthetic discovery failure");
+                    return std::vector<Device>{};
+                });
+                state->close_source = g_timeout_add(1, +[](gpointer value) -> gboolean {
+                    auto* pending = static_cast<Scenario*>(value);
+                    if (!pending->started.load()) return G_SOURCE_CONTINUE;
+                    pending->desktop->alive_ = false;
+                    gtk_window_destroy(GTK_WINDOW(pending->desktop->window_));
+                    pending->desktop->window_ = nullptr;
+                    pending->closed = true; pending->close_source = 0;
+                    // Only the discovery hold can keep the application loop
+                    // alive until this timer allows the worker to finish.
+                    pending->release_source = g_timeout_add(20, +[](gpointer item) -> gboolean {
+                        auto* waiting = static_cast<Scenario*>(item);
+                        waiting->release.store(true); waiting->release_source = 0;
+                        return G_SOURCE_REMOVE;
+                    }, pending);
+                    return G_SOURCE_REMOVE;
+                }, state);
+                state->deadline_source = g_timeout_add(2500, +[](gpointer value) -> gboolean {
+                    auto* pending = static_cast<Scenario*>(value);
+                    pending->timed_out = true; pending->release.store(true); pending->deadline_source = 0;
+                    g_application_quit(G_APPLICATION(pending->desktop->app_));
+                    return G_SOURCE_REMOVE;
+                }, state);
+            }), &scenario);
+            const int status = g_application_run(G_APPLICATION(application), 0, nullptr);
+            const bool waited = scenario.closed && scenario.finished.load() && scenario.desktop && !scenario.desktop->refreshing_;
+            // Keep failure cleanup safe too, so a missing hold fails an
+            // assertion rather than leaving the synthetic worker behind.
+            scenario.release.store(true);
+            const auto cleanup_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+            while (scenario.desktop && scenario.desktop->refreshing_ && std::chrono::steady_clock::now() < cleanup_deadline) {
+                while (g_main_context_pending(nullptr)) g_main_context_iteration(nullptr, FALSE);
+                g_usleep(1000);
+            }
+            for (const auto source : {scenario.close_source, scenario.release_source, scenario.deadline_source})
+                if (source && g_main_context_find_source_by_id(nullptr, source)) g_source_remove(source);
+            if (scenario.desktop && scenario.desktop->window_) {
+                scenario.desktop->alive_ = false;
+                gtk_window_destroy(GTK_WINDOW(scenario.desktop->window_)); scenario.desktop->window_ = nullptr;
+            }
+            scenario.desktop.reset(); g_object_unref(application);
+            workflow_check(waited, "closing the final window waits for the synthetic discovery result, including failure");
+            workflow_check(!scenario.timed_out, "discovery releases the application hold without a forced quit");
+            workflow_check(status == 0, "the discovery shutdown path exits the actual application loop successfully");
+        }
+    }
     static std::string activity(Desktop& ui) {
         auto* buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(ui.activity_view_)); GtkTextIter first, last;
         gtk_text_buffer_get_bounds(buffer, &first, &last);
@@ -417,6 +483,7 @@ int main() {
             std::string detail = error->message; g_clear_error(&error); throw std::runtime_error(detail);
         }
         DesktopUiTest::run(app);
+        DesktopUiTest::discovery_shutdown_regressions();
         std::cout << workflow_checks << " actual desktop workflow checks passed; no drive was opened.\n";
     } catch (const std::exception& failure) {
         std::cerr << "Desktop workflow regression: " << failure.what() << '\n'; result = 1;
