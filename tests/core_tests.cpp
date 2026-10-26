@@ -15,6 +15,7 @@
 #include <string>
 #include <sys/file.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
 #include <vector>
@@ -848,6 +849,154 @@ void log_and_utility_tests(const Temp& temp) {
     log_event("logging resumes after contention");
     const auto recovered_log = get(path);
     check(std::count(recovered_log.begin(), recovered_log.end(), '\n') == 2, "logging recovers after contention without adding a failed record");
+    log_event("warning marker", LogLevel::warning);
+    log_event("error marker", LogLevel::error);
+    const auto report = read_diagnostics();
+    check(report.find("Kavrune ") == 0 && report.find("local diagnostics") != std::string::npos,
+          "diagnostic report identifies the application and installed build version");
+    check(report.find("level=warning message=warning marker") != std::string::npos &&
+          report.find("level=error message=error marker") != std::string::npos && report.find("Z level=info") != std::string::npos,
+          "new records use explicit UTC timestamps and structured severity");
+    log_event("Unicode: Ω 日本語 \xff\xfe\xe2\x80\xae disguised\nnext");
+    const auto unicode_report = read_diagnostics();
+    check(unicode_report.find("Ω 日本語") != std::string::npos && unicode_report.find('\xff') == std::string::npos &&
+          unicode_report.find("\xe2\x80\xae") == std::string::npos && unicode_report.find("disguised next") != std::string::npos,
+          "diagnostics preserve ordinary Unicode and remove invalid UTF-8, direction overrides and forged newlines");
+    clear_diagnostics();
+    log_event(std::string(1000000, 'x'));
+    check(get(path).size() == 8192, "individual event records are capped at eight KiB including metadata");
+    const auto previous_path = path + ".1";
+    for (int i = 0; i < 90; ++i) log_event("rotation " + std::to_string(i) + " " + std::string(8000, 'x'));
+    check(std::filesystem::file_size(path) <= 256 * 1024 && std::filesystem::file_size(previous_path) <= 256 * 1024,
+          "rotation bounds both current and previous log storage");
+    const auto rotated_report = read_diagnostics();
+    check(rotated_report.find("Previous activity") != std::string::npos && rotated_report.find("rotation 89 ") != std::string::npos &&
+          rotated_report.size() < 513 * 1024, "bounded report includes the previous generation and newest record");
+    {
+        Descriptor oversized(path);
+        constexpr off_t giant_size = 64 * 1024 * 1024;
+        const std::string tail = "\nlegacy tail marker\n";
+        check(::ftruncate(oversized.fd, giant_size) == 0 &&
+              ::pwrite(oversized.fd, tail.data(), tail.size(), giant_size - static_cast<off_t>(tail.size())) == static_cast<ssize_t>(tail.size()),
+              "oversized legacy log fixture is sparse and disposable");
+    }
+    check(read_diagnostics().find("legacy tail marker") != std::string::npos && read_diagnostics().size() < 513 * 1024,
+          "oversized existing logs are read through a bounded tail");
+    log_event("after oversized log");
+    check(std::filesystem::file_size(path) < 8192 && std::filesystem::file_size(previous_path) <= 256 * 1024 &&
+          read_diagnostics().find("legacy tail marker") != std::string::npos,
+          "logging trims oversized legacy files while keeping their bounded recent records");
+    const auto exported = temp.file("diagnostics Ω.txt");
+    export_diagnostics(exported);
+    const auto exported_bytes = get(exported);
+    check(std::string(exported_bytes.begin(), exported_bytes.end()) == read_diagnostics(), "export is an exact snapshot of locally inspectable diagnostics");
+    check(::stat(exported.c_str(), &st) == 0 && (st.st_mode & 0777) == 0600, "exported diagnostics request owner-only permissions");
+    fails([&] { export_diagnostics(exported); }, "export refuses an existing destination");
+    check(get(exported) == exported_bytes, "refused export preserves the existing report");
+    const auto outside = temp.file("private outside.txt");
+    const std::vector<unsigned char> secret = {'k', 'e', 'e', 'p'};
+    put(outside, secret);
+    const auto export_link = temp.file("export-link.txt");
+    std::filesystem::create_symlink(outside, export_link);
+    fails([&] { export_diagnostics(export_link); }, "export refuses a symbolic-link destination");
+    check(get(outside) == secret, "refused export cannot replace a linked destination");
+    std::filesystem::remove(export_link);
+    std::filesystem::create_hard_link(outside, export_link);
+    fails([&] { export_diagnostics(export_link); }, "export refuses an existing hard-linked destination");
+    std::filesystem::remove(previous_path);
+    std::filesystem::create_symlink(outside, previous_path);
+    const auto before_unsafe_clear = get(path);
+    fails([&] { clear_diagnostics(); }, "clear rejects a symbolic-link previous generation");
+    check(get(path) == before_unsafe_clear && get(outside) == secret, "clear validates all records before modifying any file");
+    fails([&] { read_diagnostics(); }, "diagnostic inspection refuses a symbolic-link generation");
+    std::filesystem::remove(previous_path);
+    std::filesystem::create_hard_link(outside, previous_path);
+    fails([&] { clear_diagnostics(); }, "clear rejects a hard-linked generation");
+    std::filesystem::remove(previous_path);
+    {
+        Descriptor oversized(path);
+        check(::ftruncate(oversized.fd, 512 * 1024) == 0, "unsafe archive rotation fixture");
+    }
+    std::filesystem::create_symlink(outside, previous_path);
+    fails([&] { log_event("unsafe rotation"); }, "rotation refuses a substituted archive link");
+    check(std::filesystem::file_size(path) == 512 * 1024 && get(outside) == secret,
+          "failed rotation leaves the active log and outside destination untouched");
+    std::filesystem::remove(previous_path);
+    clear_diagnostics();
+    log_event("before clear");
+    std::filesystem::create_hard_link(path, previous_path);
+    fails([&] { read_diagnostics(); }, "diagnostics reject hard-linked active records");
+    fails([&] { clear_diagnostics(); }, "clear rejects hard-linked active records");
+    fails([&] { log_event("hard linked write"); }, "append rejects hard-linked active records");
+    std::filesystem::remove(previous_path);
+    // Hold the stable lock in another process, then verify every public
+    // diagnostics operation fails promptly without modifying existing data.
+    int ready_pipe[2] {}, release_pipe[2] {};
+    check(::pipe(ready_pipe) == 0 && ::pipe(release_pipe) == 0, "interprocess diagnostics lock pipes");
+    const pid_t child = ::fork();
+    if (child == 0) {
+        ::close(ready_pipe[0]); ::close(release_pipe[1]);
+        const int locked = ::open((state / "kavrune/.events.lock").c_str(), O_RDWR | O_CLOEXEC);
+        const char ready = locked >= 0 && ::flock(locked, LOCK_EX | LOCK_NB) == 0 ? 'y' : 'n';
+        if (::write(ready_pipe[1], &ready, 1) != 1) ::_exit(2);
+        char release = 0;
+        if (::read(release_pipe[0], &release, 1) != 1) ::_exit(3);
+        if (locked >= 0) ::close(locked);
+        ::_exit(ready == 'y' ? 0 : 1);
+    }
+    if (child < 0) throw std::runtime_error("diagnostics lock fork failed");
+    ::close(ready_pipe[1]); ::close(release_pipe[0]);
+    char child_ready = 0;
+    check(::read(ready_pipe[0], &child_ready, 1) == 1 && child_ready == 'y', "another process owns the stable diagnostics lock");
+    const auto before_contention = get(path);
+    fails([&] { clear_diagnostics(); }, "clear cannot race a process that owns the stable lock");
+    fails([&] { read_diagnostics(); }, "inspection does not block on another process");
+    fails([&] { log_event("locked append"); }, "append does not block on the stable process lock");
+    const auto locked_export = temp.file("locked-export.txt");
+    fails([&] { export_diagnostics(locked_export); }, "export does not block on the stable process lock");
+    check(!std::filesystem::exists(locked_export) && get(path) == before_contention,
+          "contention creates no partial export and cannot clear records");
+    const char release = 'x';
+    check(::write(release_pipe[1], &release, 1) == 1, "release the child diagnostics lock");
+    ::close(ready_pipe[0]); ::close(release_pipe[1]);
+    int child_status = 0;
+    check(::waitpid(child, &child_status, 0) == child && WIFEXITED(child_status) && WEXITSTATUS(child_status) == 0,
+          "interprocess lock fixture exits cleanly");
+    clear_diagnostics();
+    std::thread concurrent_writer([] { for (int i = 0; i < 100; ++i) log_event("concurrent before deletion"); });
+    for (int i = 0; i < 40; ++i) clear_diagnostics();
+    concurrent_writer.join();
+    clear_diagnostics();
+    log_event("after deletion marker");
+    check(read_diagnostics().find("concurrent before deletion") == std::string::npos &&
+          read_diagnostics().find("after deletion marker") != std::string::npos,
+          "concurrent clear and append cannot resurrect activity older than the final clear");
+    // An entry swapped to a symlink during repeated clears must never direct
+    // deletion to the outside file. All I/O uses pinned, checked descriptors.
+    std::atomic_bool racing{true};
+    std::thread replacer([&] {
+        while (racing.load(std::memory_order_relaxed)) {
+            std::error_code ignored;
+            std::filesystem::create_symlink(outside, previous_path, ignored);
+            std::filesystem::remove(previous_path, ignored);
+        }
+    });
+    for (int i = 0; i < 100; ++i) {
+        try { clear_diagnostics(); } catch (const Error&) {}
+    }
+    racing = false;
+    replacer.join();
+    check(get(outside) == secret, "clear races against symlink replacement cannot modify outside files");
+    std::filesystem::remove(previous_path);
+    clear_diagnostics();
+    check(get(path).empty() && read_diagnostics().find("No saved activity.") != std::string::npos,
+          "clearing saved diagnostics removes both retained generations");
+    const auto stable_lock = state / "kavrune/.events.lock";
+    std::filesystem::remove(stable_lock);
+    std::filesystem::create_symlink(outside, stable_lock);
+    fails([&] { clear_diagnostics(); }, "a substituted stable lock cannot bypass secure clear");
+    check(get(outside) == secret, "unsafe stable lock never changes outside data");
+    std::filesystem::remove(stable_lock);
     if (prior) ::setenv("XDG_STATE_HOME", prior_value.c_str(), 1); else ::unsetenv("XDG_STATE_HOME");
 }
 

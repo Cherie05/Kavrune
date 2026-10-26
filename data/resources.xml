@@ -7,5 +7,7 @@
     <file alias="legal/PRIVACY.md">../PRIVACY.md</file>
     <file alias="legal/DISCLAIMER.md">../DISCLAIMER.md</file>
     <file alias="legal/LICENSE">../LICENSE</file>
+    <file alias="legal/THIRD_PARTY_LICENSES.md">../THIRD_PARTY_LICENSES.md</file>
+    <file alias="legal/SUPPORT.md">../SUPPORT.md</file>
   </gresource>
 </gresources>

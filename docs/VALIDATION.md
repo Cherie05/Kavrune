@@ -1,5 +1,7 @@
 # Validation and release gates
 
+The [26 October standards assessment](STANDARDS_ASSESSMENT.md) maps the supplied desktop checklist to current evidence; [TEST_PLAN.md](../TEST_PLAN.md) and [RELEASE_CHECKLIST.md](../RELEASE_CHECKLIST.md) define the permanent applicable acceptance rules. `offline-local-workflows` adds process-level network-denied CLI and normal-build desktop checks. The sanitizer run uses the guarded CLI plus separately tested GTK controls, whose process-wide toolkit caches have leak detection disabled. Local artifact measurements are provisional smoke budgets, not a hardware performance certificate.
+
 ## Automated checks in this checkout
 
 `scripts/build.sh` compiles the desktop and CLI, then runs engine regression tests, storage safety/identity tests, CLI help, the safe self-test and a CLI file simulation. All automated write tests use disposable regular files. `kavrune --smoke-test` checks its own UI initialization with a display, even if another Kavrune instance is open, and performs no destructive operation.

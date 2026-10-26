@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "kavrune/core.hpp"
 #include "kavrune/storage.hpp"
+#include "kavrune/version.hpp"
 #include <algorithm>
 #include <cctype>
 #include <csignal>
@@ -99,13 +100,14 @@ af::Device target(af::Storage& storage, const Options& opts) {
     return storage.revalidate(d);
 }
 void help() {
-    std::cout << "Kavrune 0.1.0 — native Linux USB media utility (development preview)\n\n"
+    std::cout << "Kavrune " KAVRUNE_VERSION " — native Linux USB media utility (development preview)\n\n"
       "Usage:\n"
       "  kavrune-cli devices [--all] [--json]\n"
       "  kavrune-cli inspect IMAGE [--json]\n"
       "  kavrune-cli checksum IMAGE [--algorithm SHA256] [--expected HEX]\n"
       "  kavrune-cli self-test [--json]\n"
       "  kavrune-cli simulate IMAGE NEW_FILE\n"
+      "  kavrune-cli diagnostics [--export NEW_FILE | --clear --confirm clear]\n"
       "  kavrune-cli write IMAGE --device ID --confirm /dev/DEVICE\n"
       "  kavrune-cli format --device ID --confirm /dev/DEVICE [--scheme gpt|mbr]\n"
       "                        [--filesystem vfat|exfat|ext4] [--label NAME]\n"
@@ -124,8 +126,19 @@ int main(int argc, char** argv) {
     std::signal(SIGTERM, stop);
     try {
         if (argc < 2 || std::string(argv[1]) == "--help" || std::string(argv[1]) == "help") { help(); return 0; }
+        if (std::string(argv[1]) == "--version") { std::cout << "Kavrune " KAVRUNE_VERSION " preview\n"; return 0; }
         if (::geteuid() == 0) throw af::Error("Run Kavrune as a normal user. UDisks2 and Polkit authorize individual storage operations.");
         std::string command = argv[1];
+        if (command == "diagnostics") {
+            if (argc == 2) std::cout << af::read_diagnostics();
+            else if (argc == 4 && std::string(argv[2]) == "--export") {
+                af::export_diagnostics(argv[3]);
+                std::cout << "Diagnostics saved. Review paths, device identifiers and checksums before sharing.\n";
+            } else if (argc == 5 && std::string(argv[2]) == "--clear" && std::string(argv[3]) == "--confirm" && std::string(argv[4]) == "clear") {
+                af::clear_diagnostics(); std::cout << "Saved diagnostic history cleared. Source images and backups were not changed.\n";
+            } else throw af::Error("Usage: kavrune-cli diagnostics [--export NEW_FILE | --clear --confirm clear]");
+            return 0;
+        }
         if (command == "self-test") {
             const auto opts = options(argc, argv, 2, {"--json"});
             const auto result = af::run_self_test(report, cancelled);

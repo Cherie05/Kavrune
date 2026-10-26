@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Original implementation. Image contents and device descriptors are untrusted.
 #include "kavrune/core.hpp"
+#include "kavrune/version.hpp"
 
 #include <openssl/evp.h>
 #include <algorithm>
@@ -457,6 +458,8 @@ bool el_torito(int fd, uint64_t size, const unsigned char* descriptor) {
 }
 
 std::mutex log_mutex;
+constexpr size_t log_limit = 256 * 1024;
+constexpr size_t log_record_limit = 8192;
 
 std::string state_directory() {
     const char* xdg = std::getenv("XDG_STATE_HOME");
@@ -487,6 +490,103 @@ Fd secure_state_directory() {
     if (st.st_uid != ::geteuid()) throw Error("The application state directory belongs to another user.");
     if (::fchmod(current.get(), 0700) != 0) system_error("Could not secure the state directory");
     return current;
+}
+
+bool same_file(const struct stat& first, const struct stat& second) {
+    return first.st_dev == second.st_dev && first.st_ino == second.st_ino;
+}
+
+void validate_state_directory(int directory) {
+    struct stat current {};
+    if (::fstatat(AT_FDCWD, state_directory().c_str(), &current, AT_SYMLINK_NOFOLLOW) != 0 ||
+        !S_ISDIR(current.st_mode) || !same_file(file_stat(directory), current))
+        throw Error("The diagnostics folder was moved or replaced. Reload activity and try again.");
+}
+
+void validate_log_entry(int directory, const char* name, int descriptor) {
+    const auto opened = file_stat(descriptor);
+    struct stat current {};
+    if (!S_ISREG(opened.st_mode) || opened.st_uid != ::geteuid() || opened.st_nlink != 1 ||
+        ::fstatat(directory, name, &current, AT_SYMLINK_NOFOLLOW) != 0 ||
+        !S_ISREG(current.st_mode) || !same_file(opened, current))
+        throw Error("A diagnostics file has an unsafe owner, type, link count, or changed identity.");
+    validate_state_directory(directory);
+}
+
+Fd open_log_entry(int directory, const char* name, bool create) {
+    Fd file(::openat(directory, name, O_RDWR | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK | (create ? O_CREAT : 0), 0600));
+    if (file.get() < 0) {
+        if (!create && errno == ENOENT) return file;
+        system_error("Could not securely open local diagnostics");
+    }
+    validate_log_entry(directory, name, file.get());
+    if (::fchmod(file.get(), 0600) != 0) system_error("Could not secure diagnostics permissions");
+    // Diagnostics are optional: never wait behind another process, including
+    // one suspended while saving or inspecting activity.
+    while (::flock(file.get(), LOCK_EX | LOCK_NB) != 0) {
+        if (errno != EINTR) system_error("Local diagnostics are busy; try again after the other operation");
+    }
+    validate_log_entry(directory, name, file.get());
+    return file;
+}
+
+struct LogSession {
+    Fd directory = secure_state_directory();
+    // This fixed lock is never renamed or removed, so read/rotate/clear cannot
+    // acquire locks on different generations of the active log file.
+    Fd lock = open_log_entry(directory.get(), ".events.lock", true);
+    void validate() const { validate_log_entry(directory.get(), ".events.lock", lock.get()); }
+};
+
+std::string bounded_log_tail(int descriptor) {
+    const auto st = file_stat(descriptor);
+    if (st.st_size < 0) throw Error("The diagnostics size is invalid.");
+    const auto size = static_cast<uint64_t>(st.st_size);
+    const auto bytes = static_cast<size_t>(std::min<uint64_t>(size, log_limit));
+    std::string text(bytes, '\0');
+    if (bytes) read_exact(descriptor, text.data(), bytes, size - bytes);
+    if (size > bytes) {
+        // Never present a suffix fragment as a complete historical record.
+        const auto newline = text.find('\n');
+        text.erase(0, newline == std::string::npos ? text.size() : newline + 1);
+    }
+    return text;
+}
+
+std::string clean_diagnostic_text(const std::string& input, size_t limit, bool multiline = false) {
+    std::string text;
+    const size_t end = std::min(input.size(), limit);
+    text.reserve(end);
+    for (size_t i = 0; i < end;) {
+        const auto first = static_cast<unsigned char>(input[i]);
+        if (first < 0x80) {
+            text += (first >= 0x20 && first != 0x7f) || (multiline && first == '\n') ? static_cast<char>(first) : ' ';
+            ++i;
+            continue;
+        }
+        const size_t count = first >= 0xc2 && first <= 0xdf ? 2 : first >= 0xe0 && first <= 0xef ? 3 : first >= 0xf0 && first <= 0xf4 ? 4 : 0;
+        uint32_t codepoint = count ? first & ((1U << (7 - count)) - 1) : 0;
+        bool valid = count && count <= end - i;
+        for (size_t j = 1; valid && j < count; ++j) {
+            const auto next = static_cast<unsigned char>(input[i + j]);
+            valid = (next & 0xc0) == 0x80;
+            codepoint = (codepoint << 6) | (next & 0x3f);
+        }
+        valid = valid && (count != 3 || codepoint >= 0x800) && (count != 4 || codepoint >= 0x10000) &&
+                codepoint <= 0x10ffff && !(codepoint >= 0xd800 && codepoint <= 0xdfff);
+        if (!valid) { text += ' '; ++i; continue; }
+        // Control and directional override characters must not forge records
+        // or conceal what a user is about to share. Ordinary Unicode remains.
+        if ((codepoint >= 0x80 && codepoint <= 0x9f) || codepoint == 0x2028 || codepoint == 0x2029 ||
+            (codepoint >= 0x202a && codepoint <= 0x202e) || (codepoint >= 0x2066 && codepoint <= 0x2069)) text += ' ';
+        else text.append(input, i, count);
+        i += count;
+    }
+    return text;
+}
+
+void truncate_log(int descriptor) {
+    if (::ftruncate(descriptor, 0) != 0) system_error("Could not clear local diagnostics");
 }
 }
 
@@ -909,38 +1009,118 @@ std::string log_path() {
     return state_directory() + "/events.log";
 }
 
-void log_event(const std::string& message) {
+void log_event(const std::string& message, LogLevel level) {
     std::lock_guard<std::mutex> lock(log_mutex);
-    Fd directory = secure_state_directory();
-    // A substituted FIFO must fail immediately, before the descriptor type check.
-    // O_NONBLOCK has no effect on the ordinary regular files accepted below.
-    Fd output(::openat(directory.get(), "events.log", O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK, 0600));
-    if (output.get() < 0) system_error("Could not securely open the event log");
-    const auto st = file_stat(output.get());
-    if (!S_ISREG(st.st_mode) || st.st_uid != ::geteuid() || st.st_nlink != 1) throw Error("The event log has an unsafe owner, type, or link count.");
-    if (::fchmod(output.get(), 0600) != 0) system_error("Could not secure log permissions");
-    // Logging is optional. A competing or suspended writer must never block
-    // the UI or keep a completed storage operation in a busy state.
-    while (::flock(output.get(), LOCK_EX | LOCK_NB) != 0) { if (errno != EINTR) system_error("Could not lock the event log"); }
+    LogSession session;
+    Fd output = open_log_entry(session.directory.get(), "events.log", true);
     std::time_t now = std::time(nullptr);
     struct tm calendar {};
-    ::localtime_r(&now, &calendar);
+    ::gmtime_r(&now, &calendar);
     std::ostringstream line;
-    line << std::put_time(&calendar, "%Y-%m-%d %H:%M:%S %z") << ' ';
-    // Prevent attacker-controlled filenames and errors from injecting forged log lines.
-    for (size_t i = 0; i < std::min<size_t>(message.size(), 8192); ++i) {
-        const auto c = static_cast<unsigned char>(message[i]);
-        if (c < 0x20 || c == 0x7f) line << ' ';
-        else line << static_cast<char>(c);
+    const char* severity = level == LogLevel::error ? "error" : level == LogLevel::warning ? "warning" : "info";
+    line << std::put_time(&calendar, "%Y-%m-%dT%H:%M:%SZ") << " level=" << severity << " message=";
+    const auto prefix = line.str();
+    const auto bytes = prefix + clean_diagnostic_text(message, log_record_limit - prefix.size() - 1) + '\n';
+    auto size = file_stat(output.get()).st_size;
+    if (size < 0) throw Error("The diagnostics size is invalid.");
+    if (static_cast<uint64_t>(size) + bytes.size() > log_limit) {
+        // Fixed filenames plus pinned descriptors avoid rename/unlink races.
+        // Keep one bounded previous generation; trim oversized legacy logs
+        // without ever allocating memory proportional to their claimed size.
+        Fd previous = open_log_entry(session.directory.get(), "events.log.1", true);
+        const auto retained = bounded_log_tail(output.get());
+        session.validate();
+        validate_log_entry(session.directory.get(), "events.log", output.get());
+        validate_log_entry(session.directory.get(), "events.log.1", previous.get());
+        truncate_log(previous.get());
+        if (!retained.empty()) write_exact(previous.get(), retained.data(), retained.size(), 0);
+        truncate_log(output.get());
+        size = 0;
     }
-    line << '\n';
-    const auto bytes = line.str();
-    size_t done = 0;
-    while (done < bytes.size()) {
-        const auto count = ::write(output.get(), bytes.data() + done, bytes.size() - done);
-        if (count < 0) { if (errno == EINTR) continue; system_error("Could not append the event log"); }
-        if (count == 0) throw Error("The event log accepted no data.");
-        done += static_cast<size_t>(count);
+    session.validate();
+    validate_log_entry(session.directory.get(), "events.log", output.get());
+    write_exact(output.get(), bytes.data(), bytes.size(), static_cast<uint64_t>(size));
+}
+
+std::string read_diagnostics() {
+    std::lock_guard<std::mutex> lock(log_mutex);
+    LogSession session;
+    Fd previous = open_log_entry(session.directory.get(), "events.log.1", false);
+    Fd current = open_log_entry(session.directory.get(), "events.log", false);
+    std::string report = "Kavrune " KAVRUNE_VERSION " — local diagnostics\n"
+        "Review before sharing: records may contain private filenames, paths, device identifiers and checksums.\n"
+        "Retention: current and previous logs, up to 256 KiB each; no age-based expiry. Nothing is uploaded.\n\n";
+    bool has_records = false;
+    for (const auto* file : {&previous, &current}) {
+        if (file->get() < 0) continue;
+        const auto content = bounded_log_tail(file->get());
+        if (!content.empty()) {
+            report += file == &previous ? "Previous activity\n" : "Current activity\n";
+            report += clean_diagnostic_text(content, log_limit, true);
+            if (report.back() != '\n') report += '\n';
+            has_records = true;
+        }
+    }
+    session.validate();
+    if (previous.get() >= 0) validate_log_entry(session.directory.get(), "events.log.1", previous.get());
+    if (current.get() >= 0) validate_log_entry(session.directory.get(), "events.log", current.get());
+    if (!has_records) report += "No saved activity.\n";
+    return report;
+}
+
+void clear_diagnostics() {
+    std::lock_guard<std::mutex> lock(log_mutex);
+    LogSession session;
+    Fd current = open_log_entry(session.directory.get(), "events.log", false);
+    Fd previous = open_log_entry(session.directory.get(), "events.log.1", false);
+    // Open, validate and lock both before changing either. This also prevents
+    // clearing one log when a second entry is an unsafe replacement.
+    session.validate();
+    if (current.get() >= 0) validate_log_entry(session.directory.get(), "events.log", current.get());
+    if (previous.get() >= 0) validate_log_entry(session.directory.get(), "events.log.1", previous.get());
+    if (current.get() >= 0) truncate_log(current.get());
+    if (previous.get() >= 0) truncate_log(previous.get());
+    session.validate();
+    if (current.get() >= 0) validate_log_entry(session.directory.get(), "events.log", current.get());
+    if (previous.get() >= 0) validate_log_entry(session.directory.get(), "events.log.1", previous.get());
+}
+
+void export_diagnostics(const std::string& destination) {
+    const auto report = read_diagnostics();
+    const auto path = std::filesystem::path(destination);
+    const auto filename = path.filename().string();
+    if (filename.empty() || filename == "." || filename == ".." || destination.find('\0') != std::string::npos)
+        throw Error("Choose a valid filename for the diagnostics report.");
+    const auto parent_path = path.has_parent_path() ? path.parent_path() : std::filesystem::path(".");
+    Fd parent(::open(parent_path.c_str(), O_RDONLY | O_CLOEXEC | O_DIRECTORY));
+    if (parent.get() < 0) system_error("Could not open the report destination folder");
+    const auto parent_identity = file_stat(parent.get());
+    Fd output(::openat(parent.get(), filename.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK, 0600));
+    if (output.get() < 0) system_error("Could not create the report (existing files are never overwritten)");
+    const auto created = file_stat(output.get());
+    try {
+        const auto validate = [&] {
+            struct stat directory {}, current {};
+            const auto opened = file_stat(output.get());
+            if (!S_ISREG(opened.st_mode) || opened.st_uid != ::geteuid() || opened.st_nlink != 1 ||
+                ::stat(parent_path.c_str(), &directory) != 0 || !S_ISDIR(directory.st_mode) || !same_file(directory, parent_identity) ||
+                ::fstatat(parent.get(), filename.c_str(), &current, AT_SYMLINK_NOFOLLOW) != 0 ||
+                !S_ISREG(current.st_mode) || !same_file(current, created))
+                throw Error("The report destination was moved, linked or replaced. Choose another filename and try again.");
+        };
+        validate();
+        if (::fchmod(output.get(), 0600) != 0) system_error("Could not secure report permissions");
+        write_exact(output.get(), report.data(), report.size(), 0);
+        sync_fd(output.get());
+        validate();
+        sync_fd(parent.get());
+        validate();
+    } catch (...) {
+        struct stat current {};
+        if (::fstatat(parent.get(), filename.c_str(), &current, AT_SYMLINK_NOFOLLOW) == 0 &&
+            same_file(current, created) && S_ISREG(current.st_mode) && current.st_nlink == 1)
+            ::unlinkat(parent.get(), filename.c_str(), 0);
+        throw;
     }
 }
 }

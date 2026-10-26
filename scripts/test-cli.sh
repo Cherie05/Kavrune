@@ -160,3 +160,35 @@ digest = run('checksum', unknown).stdout.decode().strip()
 assert len(digest) == 64
 print('CLI image compatibility and safe rejection checks passed; only temporary files were used.')
 PY
+python3 - "$cli" "$scratch" <<'PY'
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+cli, scratch = sys.argv[1], Path(sys.argv[2])
+environment = os.environ.copy()
+environment['XDG_STATE_HOME'] = str(scratch / 'private-state')
+def run(*args, success=True):
+    result = subprocess.run([cli, *map(str,args)], env=environment, text=True, capture_output=True)
+    assert (result.returncode == 0) == success, (args,result.stderr)
+    return result
+version = run('--version').stdout.split()[1]
+initial = run('diagnostics').stdout
+assert version in initial and 'No saved activity' in initial
+report = scratch / 'diagnostics Ω report.txt'
+run('diagnostics','--export',report)
+assert report.read_text() == initial and report.stat().st_mode & 0o777 == 0o600
+run('diagnostics','--export',report,success=False)
+assert report.read_text() == initial
+run('diagnostics','--clear',success=False)
+run('diagnostics','--clear','--confirm','wrong',success=False)
+run('diagnostics','--clear','--confirm','clear')
+assert 'No saved activity' in run('diagnostics').stdout
+unicode_source = scratch / 'installer 日本語 with spaces.img'
+unicode_source.write_bytes(bytes(range(256)) * 128)
+unicode_copy = scratch / 'verified Ω copy.img'
+run('simulate',unicode_source,unicode_copy)
+assert unicode_source.read_bytes() == unicode_copy.read_bytes()
+print('CLI diagnostics, explicit clearing, export no-clobber and Unicode-path checks passed; private temporary files only.')
+PY

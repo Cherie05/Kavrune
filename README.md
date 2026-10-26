@@ -6,7 +6,7 @@ An independently implemented Linux desktop application for creating and verifyin
 
 **No warranty; use at your own risk.** Kavrune is provided "as is". To the fullest extent permitted by applicable law, its authors and copyright holders are not responsible or liable for claims, damages or losses arising from the software or its use, including data loss, corrupted media or device and system damage. Keep independent backups and review the [disclaimer](DISCLAIMER.md) and [MIT License](LICENSE).
 
-Read the [terms of use](TERMS.md) and [privacy notice](PRIVACY.md). The app includes an offline **Legal & privacy** reader under **How to use**, also accessible from **About Kavrune**. These notices explain behavior and risks without adding restrictions to the MIT License or requiring a separate consent screen.
+Read the [terms of use](TERMS.md) and [privacy notice](PRIVACY.md). The app includes an offline **Legal & privacy** reader under **How to use**, also accessible from **About Kavrune**, with license, third-party notices and support information. These notices explain behavior and risks without adding restrictions to the MIT License or requiring a separate consent screen.
 
 ![Kavrune native desktop preview](docs/preview.png)
 
@@ -42,7 +42,7 @@ See [image compatibility](docs/IMAGE_COMPATIBILITY.md) for supported BIOS/UEFI h
 | Back up USB | Save the entire drive to a new IMG file; check available space, refuse overwrites and report SHA-256 |
 | Check download | Calculate SHA-256 or SHA-512, identify the calculated algorithm, and optionally compare the publisher's checksum; CLI also supports legacy SHA-1/MD5 |
 | Check USB | Read the reported capacity and report read errors without writing data |
-| Activity | Private per-user technical event log |
+| Activity | Bounded private per-user history; reload, copy, save to a new file or clear retained diagnostics with confirmation |
 | How to use | In-app steps, explanations, feature limits and searchable offline terms, privacy, disclaimer and MIT license |
 | CLI | Same image engine and storage validation as desktop; JSON device/image output |
 | Packaging | Desktop entry, original SVG icon, AppStream metadata, `.deb` and SPDX inventory |
@@ -77,6 +77,8 @@ The local-header approach is for development on a matching Ubuntu host; it is no
 ```
 
 Packages and the dependency inventory appear under `dist/`. Packaging extracts and checks the new archive without installing it: legal documents, guides, embedded offline notices, desktop metadata, executable permissions and ELF hardening must pass, followed by a disposable-file CLI self-test. The check requires `dpkg-deb`, `readelf` and `gresource` (from `dpkg`, `binutils` and `libglib2.0-bin`). You can repeat it with `python3 scripts/check-package.py dist/kavrune_0.1.0_amd64.deb --self-test`.
+
+The package is also checked under process-local network denial and a disposable extraction/overlay/removal/reinstall fixture that preserves user-data sentinels. These checks do not constitute clean-VM package-manager installation or a supported-distribution qualification. Reports and an unsigned source/artifact manifest are saved in `dist/`. Optional manual signing with an existing maintainer key is described in [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md); no signing key or automatic update service is created.
 
 Installing the package is a separate user action. It installs no root application, custom daemon, setuid executable, permissive Polkit rule, or downloaded bootloader.
 
@@ -123,9 +125,15 @@ The regression suite covers corruption, cancellation, image mutation, identity c
 
 Destructive CLI commands require both the stable drive ID from `devices` and an exact matching `--confirm /dev/DEVICE` path. CLI authorization still requires a working Polkit agent. Consult `--help` for write, format, backup and scan syntax. SHA-1 and MD5 are compatibility checksums, not modern authenticity verification.
 
-Logs are stored at `$XDG_STATE_HOME/kavrune/events.log` or `~/.local/state/kavrune/events.log`, with a private directory and file. Diagnostic details may contain local device identifiers or paths; review them before sharing. They persist without automatic expiry or rotation. See the [privacy notice](PRIVACY.md) for retention, deletion, backups and clipboard handling.
+Logs are stored at `$XDG_STATE_HOME/kavrune/events.log` or `~/.local/state/kavrune/events.log`, with a private directory and files. A current and previous generation are capped at 256 KiB each, with 8 KiB records and UTC timestamps/severity. Activity supports reload, user-directed export and confirmed clearing. Details can contain local paths or device identifiers; review before sharing. There is no age expiry or telemetry. See the [privacy notice](PRIVACY.md) for retention, deletion, backups and clipboard handling.
 
-The GUI uses gettext for localization; translations and a complete accessibility audit are still release work. See the [architecture](docs/ARCHITECTURE.md) and [validation requirements](docs/VALIDATION.md) for implementation details and release limits.
+```sh
+./build/kavrune-cli diagnostics
+./build/kavrune-cli diagnostics --export new-diagnostics.txt
+./build/kavrune-cli diagnostics --clear --confirm clear
+```
+
+The GUI uses gettext for localization; translations and a complete accessibility audit are still release work. See [accessibility and keyboard use](docs/ACCESSIBILITY.md), the [architecture](docs/ARCHITECTURE.md) and [validation requirements](docs/VALIDATION.md) for implementation details and release limits.
 
 ## Open source and contributing
 
@@ -135,4 +143,4 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting a change and follow th
 
 See the [changelog](CHANGELOG.md) for preview scope and the [GitHub publishing guide](docs/PUBLISHING.md) for repository setup and release steps. Follow [SECURITY.md](SECURITY.md) for the available vulnerability reporting process.
 
-The [production audit](docs/PRODUCTION_AUDIT.md) records the current findings, fixes and release blockers. Passing local tests and adding notices do not complete production qualification.
+The [production audit](docs/PRODUCTION_AUDIT.md) records the earlier review. The [complete desktop standards assessment](docs/STANDARDS_ASSESSMENT.md) maps all 25 supplied principles and 24 release criteria to current implementation, evidence, remaining work and inapplicable features. Permanent [product standards](PRODUCT_STANDARDS.md), [requirements](PRODUCT_REQUIREMENTS.md), [architecture](ARCHITECTURE.md), [privacy/legal inventory](PRIVACY_AND_LEGAL.md), [test plan](TEST_PLAN.md) and [release checklist](RELEASE_CHECKLIST.md) ship with the package. Passing local tests and adding notices do not complete production qualification.

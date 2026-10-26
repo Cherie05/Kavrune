@@ -18,6 +18,14 @@ from pathlib import Path, PurePosixPath
 
 
 REQUIRED = {
+    "AGENTS.md",
+    "PRODUCT_REQUIREMENTS.md",
+    "PRODUCT_STANDARDS.md",
+    "ARCHITECTURE.md",
+    "PRIVACY_AND_LEGAL.md",
+    "TEST_PLAN.md",
+    "RELEASE_CHECKLIST.md",
+    "docs/STANDARDS_ASSESSMENT.md",
     ".gitignore",
     ".github/ISSUE_TEMPLATE/bug_report.yml",
     ".github/ISSUE_TEMPLATE/feature_request.yml",
@@ -43,6 +51,10 @@ REQUIRED = {
     "data/org.kavrune.Kavrune.metainfo.xml",
     "scripts/check-repository.py",
     "scripts/check-package.py",
+    "scripts/check-offline.py",
+    "scripts/release-manifest.py",
+    "scripts/sign-release.sh",
+    "include/kavrune/version.hpp.in",
 }
 
 GENERATED_SUFFIXES = {
