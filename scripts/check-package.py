@@ -111,7 +111,7 @@ def check(package: Path, root: Path, self_test: bool, offline: bool, report: Pat
                 raise ValueError(f"Unsafe package permissions: {path.relative_to(extracted)}")
 
         docs = extracted / "usr/share/doc/kavrune"
-        notices = ("LICENSE", "NOTICE", "TERMS.md", "PRIVACY.md", "DISCLAIMER.md",
+        notices = ("LICENSE", "NOTICE", "INSTALL.md", "TERMS.md", "PRIVACY.md", "DISCLAIMER.md",
                    "SECURITY.md", "THIRD_PARTY_LICENSES.md", "README.md", "CHANGELOG.md",
                    "CONTRIBUTING.md", "CODE_OF_CONDUCT.md", "SUPPORT.md",
                    "PRODUCT_REQUIREMENTS.md", "PRODUCT_STANDARDS.md", "ARCHITECTURE.md",

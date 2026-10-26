@@ -1,6 +1,6 @@
 # Contributing to Kavrune
 
-Kavrune is an original C++20 Linux desktop and CLI project in development preview. Contributions should make USB workflows understandable and preserve the storage safety checks. Follow the [Code of Conduct](CODE_OF_CONDUCT.md).
+Kavrune is an original C++20 Linux desktop and CLI project in beta development preview, under active development. Contributions should make USB workflows understandable and preserve the storage safety checks. Follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Issues and proposals
 

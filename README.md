@@ -2,7 +2,7 @@
 
 An independently implemented Linux desktop application for creating and verifying USB installation media. Written in C++20 with GTK4/libadwaita, GIO D-Bus, and OpenSSL. Project source and original icon are MIT licensed.
 
-**0.1.0 is a development preview.** Production qualification, broader physical USB validation and independent security review remain pending. Kavrune is an independent project with original source and artwork; the selected project name does not imply completed trademark clearance.
+**BETA / DEVELOPMENT PREVIEW — under active development.** Version 0.1.0 may contain bugs, unfinished features and unexpected failures. Production qualification, broader physical USB validation and independent security review remain pending. Use spare media for evaluation and keep independent backups. Kavrune is an independent project with original source and artwork; the selected project name does not imply completed trademark clearance.
 
 **No warranty; use at your own risk.** Kavrune is provided "as is". To the fullest extent permitted by applicable law, its authors and copyright holders are not responsible or liable for claims, damages or losses arising from the software or its use, including data loss, corrupted media or device and system damage. Keep independent backups and review the [disclaimer](DISCLAIMER.md) and [MIT License](LICENSE).
 
@@ -11,6 +11,8 @@ Read the [terms of use](TERMS.md) and [privacy notice](PRIVACY.md). The app incl
 ![Kavrune native desktop preview](docs/preview.png)
 
 ## Download and install the preview
+
+Users do not need Git, a compiler or a GitHub account. Follow [INSTALL.md](INSTALL.md) for download verification, installation, the first safe test, updates, removal and troubleshooting. An APT repository/PPA has not been published for this project; installing the downloaded file uses `sudo apt install ./kavrune_0.1.0_amd64.deb`.
 
 Download the `.deb` installer from [Kavrune 0.1.0 Preview 1](https://github.com/Cherie05/Kavrune/releases/tag/v0.1.0-preview.1). Preview 1 uses the Ubuntu 24.04 x86_64/amd64 build from GitHub Actions. Linux Mint 22.x is a compatibility target; real package-manager installation and physical USB acceptance remain pending. Other architectures and RPM, Flatpak and AppImage downloads are not provided.
 
@@ -156,4 +158,4 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting a change and follow th
 
 See the [changelog](CHANGELOG.md) for preview scope and the [GitHub publishing guide](docs/PUBLISHING.md) for repository setup and release steps. Follow [SECURITY.md](SECURITY.md) for the available vulnerability reporting process.
 
-The [production audit](docs/PRODUCTION_AUDIT.md) records the earlier review. The [complete desktop standards assessment](docs/STANDARDS_ASSESSMENT.md) maps all 25 supplied principles and 24 release criteria to current implementation, evidence, remaining work and inapplicable features. Permanent [product standards](PRODUCT_STANDARDS.md), [requirements](PRODUCT_REQUIREMENTS.md), [architecture](ARCHITECTURE.md), [privacy/legal inventory](PRIVACY_AND_LEGAL.md), [test plan](TEST_PLAN.md) and [release checklist](RELEASE_CHECKLIST.md) ship with the package. Passing local tests and adding notices do not complete production qualification.
+The [repository review](docs/REPOSITORY_REVIEW.md) records current notices, instructions, GitHub settings and remaining acceptance work. The [production audit](docs/PRODUCTION_AUDIT.md) records the earlier review. The [complete desktop standards assessment](docs/STANDARDS_ASSESSMENT.md) maps all 25 supplied principles and 24 release criteria to current implementation, evidence, remaining work and inapplicable features. Permanent [product standards](PRODUCT_STANDARDS.md), [requirements](PRODUCT_REQUIREMENTS.md), [architecture](ARCHITECTURE.md), [privacy/legal inventory](PRIVACY_AND_LEGAL.md), [test plan](TEST_PLAN.md) and [release checklist](RELEASE_CHECKLIST.md) ship with the package. Passing local tests and adding notices do not complete production qualification.

@@ -1,6 +1,6 @@
 # Terms of use
 
-Applies to Kavrune 0.1 preview. Last updated: 18 October 2026.
+Applies to Kavrune 0.1 beta development preview. Last updated: 26 October 2026.
 
 ## Your license
 
@@ -16,7 +16,7 @@ Use images from a publisher you trust. Kavrune verifies written bytes; it does n
 
 ## Preview status and support
 
-Version 0.1 is a development preview. Some image types and features are unsupported. Passing automated checks does not complete hardware qualification, independent security review or the distribution and firmware test matrix. There is no enterprise support agreement, availability commitment or promised response time. See [validation requirements](docs/VALIDATION.md), [image compatibility](docs/IMAGE_COMPATIBILITY.md) and [support](SUPPORT.md).
+Version 0.1 is a beta development preview under active development. Features may be unfinished, contain bugs, crash or produce incomplete results; some image types and features are unsupported. Passing automated checks does not complete hardware qualification, independent security review or the distribution and firmware test matrix. There is no enterprise support agreement, availability commitment or promised response time. See [validation requirements](docs/VALIDATION.md), [image compatibility](docs/IMAGE_COMPATIBILITY.md) and [support](SUPPORT.md).
 
 ## No warranty and limits of liability
 
