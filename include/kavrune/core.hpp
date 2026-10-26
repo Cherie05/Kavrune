@@ -64,6 +64,12 @@ void read_scan(int source_fd, uint64_t capacity, const ProgressFn& progress, con
 // Exercises the shared writer using private temporary regular files only.
 SelfTestResult run_self_test(const ProgressFn& progress, const std::atomic_bool& cancel);
 std::string human_size(uint64_t bytes);
-void log_event(const std::string& message);
+enum class LogLevel { info, warning, error };
+void log_event(const std::string& message, LogLevel level = LogLevel::info);
 std::string log_path();
+// Local, bounded diagnostics only. No function uploads or reads drive contents.
+// Export creates a new owner-only file; existing destinations are never replaced.
+std::string read_diagnostics();
+void clear_diagnostics();
+void export_diagnostics(const std::string& destination);
 }

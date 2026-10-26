@@ -3,6 +3,7 @@
 // constructed but never presented; no discovery, disk operation or dialog runs.
 #define KAVRUNE_DESKTOP_TEST
 #include "../src/desktop.cpp"
+#include <fstream>
 #include <iostream>
 
 namespace {
@@ -15,6 +16,110 @@ bool enabled(GtkWidget* widget) { return gtk_widget_get_sensitive(widget); }
 std::string text(GtkWidget* widget) { return gtk_label_get_text(GTK_LABEL(widget)); }
 
 struct DesktopUiTest {
+    static std::string activity(Desktop& ui) {
+        auto* buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(ui.activity_view_)); GtkTextIter first, last;
+        gtk_text_buffer_get_bounds(buffer, &first, &last);
+        gchar* shown = gtk_text_buffer_get_text(buffer, &first, &last, FALSE);
+        std::string result(shown); g_free(shown); return result;
+    }
+    static void standards_regressions(Desktop& ui) {
+        workflow_check(ui.persistent_labels_.size() == 9,
+                       "USB selectors, format settings and checksum fields have persistent labels");
+        for (auto* title : ui.persistent_labels_) {
+            auto* widget = gtk_label_get_mnemonic_widget(GTK_LABEL(title));
+            workflow_check(widget && gtk_test_accessible_has_property(GTK_ACCESSIBLE(widget), GTK_ACCESSIBLE_PROPERTY_LABEL) &&
+                           gtk_test_accessible_has_relation(GTK_ACCESSIBLE(widget), GTK_ACCESSIBLE_RELATION_LABELLED_BY),
+                           "each persistent field label is programmatically associated with its native control");
+        }
+        workflow_check(gtk_test_accessible_has_relation(GTK_ACCESSIBLE(ui.progress_bar_), GTK_ACCESSIBLE_RELATION_DESCRIBED_BY),
+                       "the native progress bar is associated with its detailed status");
+        auto** shortcuts = gtk_application_get_accels_for_action(GTK_APPLICATION(ui.app_), "app.close");
+        workflow_check(shortcuts && shortcuts[0] && shortcuts[1], "standard close shortcuts use the window's existing safe close path"); g_strfreev(shortcuts);
+
+        gboolean previous_motion = TRUE;
+        g_object_get(ui.settings_, "gtk-enable-animations", &previous_motion, nullptr);
+        ui.busy_ = true; ui.cancel_->store(false); ui.progress_usb_creation_ = true;
+        ui.progress_started_ = std::chrono::steady_clock::now();
+        g_object_set(ui.settings_, "gtk-enable-animations", FALSE, nullptr);
+        ui.apply_progress({"Synchronizing", 1024, 1024, 0, ""});
+        workflow_check(!ui.animations_enabled_ && !gtk_spinner_get_spinning(GTK_SPINNER(ui.progress_spinner_)) &&
+                       !gtk_widget_get_visible(ui.progress_spinner_), "reduced motion disables the custom progress spinner");
+        workflow_check(gtk_stack_get_transition_type(GTK_STACK(ui.stack_)) == GTK_STACK_TRANSITION_TYPE_NONE,
+                       "reduced motion disables page transition animation");
+        workflow_check(ui.progress_timer_ && text(ui.progress_detail_).find("Still working") != std::string::npos &&
+                       gtk_progress_bar_get_fraction(GTK_PROGRESS_BAR(ui.progress_bar_)) < 1,
+                       "reduced motion retains elapsed activity and truthful incomplete saving progress");
+        g_object_set(ui.settings_, "gtk-enable-animations", TRUE, nullptr);
+        workflow_check(gtk_spinner_get_spinning(GTK_SPINNER(ui.progress_spinner_)) &&
+                       gtk_stack_get_transition_type(GTK_STACK(ui.stack_)) == GTK_STACK_TRANSITION_TYPE_CROSSFADE,
+                       "changing the system motion preference during an operation takes effect immediately");
+        ui.finish_progress(false); ui.busy_ = false;
+        workflow_check(!ui.inhibit_cookie_, "the terminal progress path releases any session inhibitor");
+        g_object_set(ui.settings_, "gtk-enable-animations", previous_motion, nullptr);
+
+        log_event("saved-diagnostic-regression-marker"); ui.load_activity();
+        workflow_check(activity(ui).find("saved-diagnostic-regression-marker") != std::string::npos &&
+                       activity(ui).find(KAVRUNE_VERSION) != std::string::npos,
+                       "Activity reads persistent local diagnostics with the runtime application version");
+        ui.busy_ = true; ui.update_controls(); const auto before = activity(ui);
+        workflow_check(!enabled(ui.activity_reload_) && !enabled(ui.activity_export_) && !enabled(ui.activity_clear_),
+                       "reload, export and clear are unavailable during active media operations");
+        ui.clear_activity(); ui.load_activity();
+        workflow_check(activity(ui) == before && ui.clear_activity_dialog() == nullptr,
+                       "programmatic clear and reload cannot replace diagnostics while an operation is running");
+        ui.busy_ = false; ui.update_controls();
+        workflow_check(enabled(ui.activity_reload_) && enabled(ui.activity_export_) && enabled(ui.activity_clear_),
+                       "saved diagnostics controls become available when an operation ends");
+        auto* dialog = ui.clear_activity_dialog(); g_object_ref_sink(dialog);
+        workflow_check(!gtk_widget_get_visible(dialog) &&
+                       std::string(adw_message_dialog_get_default_response(ADW_MESSAGE_DIALOG(dialog))) == "cancel" &&
+                       std::string(adw_message_dialog_get_close_response(ADW_MESSAGE_DIALOG(dialog))) == "cancel",
+                       "clearing diagnostics uses a hidden-testable confirmation that defaults to keeping data");
+        adw_message_dialog_response(ADW_MESSAGE_DIALOG(dialog), "cancel");
+        workflow_check(read_diagnostics().find("saved-diagnostic-regression-marker") != std::string::npos,
+                       "cancelling the clear confirmation preserves saved diagnostics"); g_object_unref(dialog);
+        dialog = ui.clear_activity_dialog(); g_object_ref_sink(dialog);
+        adw_message_dialog_response(ADW_MESSAGE_DIALOG(dialog), "clear"); g_object_unref(dialog);
+        workflow_check(activity(ui).empty() && read_diagnostics().find("saved-diagnostic-regression-marker") == std::string::npos,
+                       "explicit confirmation clears saved and displayed activity without recreating a log event");
+        workflow_check(text(ui.activity_status_).find("Exported copies") != std::string::npos,
+                       "clear explains that previously exported diagnostic copies are unaffected");
+        const auto export_path = std::string(g_getenv("XDG_STATE_HOME")) + "/ui-diagnostics.txt";
+        const auto wait_for_export = [&ui] {
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+            while (ui.activity_saving_ && std::chrono::steady_clock::now() < deadline) {
+                while (g_main_context_pending(nullptr)) g_main_context_iteration(nullptr, FALSE);
+                g_usleep(1000);
+            }
+            workflow_check(!ui.activity_saving_, "the background diagnostics export returns its final state to GTK");
+        };
+        ui.export_activity(export_path);
+        workflow_check(ui.activity_saving_ && !enabled(ui.activity_clear_) && !enabled(ui.activity_export_),
+                       "an asynchronous diagnostics export cannot be duplicated or cleared while saving");
+        workflow_check(!enabled(ui.create_) && !enabled(ui.format_) && !enabled(ui.backup_) && !enabled(ui.scan_) && !enabled(ui.check_),
+                       "image and USB operations cannot start while diagnostics may be writing to their filesystem");
+        const auto operation_before_export = ui.operation_id_;
+        ui.work("Do not run during export", [](const ProgressFn&, const std::atomic_bool&) { return std::string("Unexpected concurrent job"); });
+        workflow_check(ui.operation_id_ == operation_before_export && !ui.busy_,
+                       "the worker entry point rejects new jobs until a diagnostics export completes");
+        wait_for_export();
+        std::ifstream exported(export_path); std::string exported_text((std::istreambuf_iterator<char>(exported)), std::istreambuf_iterator<char>());
+        workflow_check(exported_text.find(KAVRUNE_VERSION) != std::string::npos &&
+                       text(ui.activity_status_).find("review") != std::string::npos &&
+                       text(ui.activity_status_).find("Nothing was uploaded") != std::string::npos,
+                       "saved diagnostics include the real version and sharing feedback remains explicitly local");
+        ui.export_activity(export_path); wait_for_export();
+        workflow_check(text(ui.activity_status_).find("could not be saved") != std::string::npos && enabled(ui.activity_export_),
+                       "an existing diagnostics filename produces recoverable feedback and restores the export action");
+        auto* buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(ui.activity_view_));
+        const std::string large(static_cast<size_t>(ui.activity_char_limit_) * 2, 'x');
+        gtk_text_buffer_set_text(buffer, large.c_str(), -1); ui.trim_activity();
+        workflow_check(gtk_text_buffer_get_char_count(buffer) <= ui.activity_char_limit_,
+                       "large session activity is bounded instead of retaining an unlimited text history");
+        ui.record(std::string("invalid-utf8-") + static_cast<char>(0xff));
+        workflow_check(g_utf8_validate(activity(ui).c_str(), -1, nullptr),
+                       "invalid bytes in a local error cannot corrupt GTK's UTF-8 activity buffer");
+    }
     static void legal_regressions(Desktop& ui) {
         workflow_check(enabled(ui.legal_access_), "legal and privacy documents are available without starting an operation");
         const auto source = ui.image_.path;
@@ -43,6 +148,7 @@ struct DesktopUiTest {
             g_free(shown); g_bytes_unref(bytes); g_clear_error(&error);
             workflow_check(same && size > 200, "switching documents displays the complete packaged source text");
         }
+        gtk_drop_down_set_selected(GTK_DROP_DOWN(reader->documents), 3);
         gtk_editable_set_text(GTK_EDITABLE(reader->search), "sOfTwArE"); reader->find();
         GtkTextIter first_match, last_match;
         workflow_check(gtk_text_buffer_get_selection_bounds(buffer, &first_match, &last_match),
@@ -168,7 +274,7 @@ struct DesktopUiTest {
         auto desktop = std::make_shared<Desktop>(app);
         struct WindowCleanup {
             Desktop* desktop;
-            ~WindowCleanup() { gtk_window_destroy(GTK_WINDOW(desktop->window_)); }
+            ~WindowCleanup() { if (desktop->window_) gtk_window_destroy(GTK_WINDOW(desktop->window_)); }
         } cleanup{desktop.get()};
         auto& ui = *desktop;
         workflow_check(!gtk_widget_get_visible(ui.window_), "test window remains hidden throughout the workflow");
@@ -283,7 +389,13 @@ struct DesktopUiTest {
         workflow_check(!enabled(ui.copy_hash_), "resetting a source removes the previous checksum copy action");
         progress_regressions(ui);
         legal_regressions(ui);
+        standards_regressions(ui);
         workflow_check(!gtk_widget_get_visible(ui.window_), "functional regression never opens a visible app window");
+        const bool motion_before_close = ui.animations_enabled_;
+        ui.alive_ = false; gtk_window_destroy(GTK_WINDOW(ui.window_)); ui.window_ = nullptr;
+        g_object_set(ui.settings_, "gtk-enable-animations", !motion_before_close, nullptr);
+        workflow_check(ui.animations_enabled_ == motion_before_close,
+                       "a system settings change after window destruction cannot access released GTK widgets");
     }
 };
 } // namespace

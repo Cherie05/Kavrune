@@ -2,10 +2,14 @@
 """Create an explicitly scoped SPDX 2.3 direct runtime dependency inventory."""
 import datetime
 import json
+import re
 from pathlib import Path
 import subprocess
 import sys
 import uuid
+
+root = Path(__file__).resolve().parent.parent
+version = re.search(r'project\(Kavrune VERSION ([0-9.]+)', (root / 'CMakeLists.txt').read_text()).group(1)
 
 dependencies = {
     'libgtk-4-1': ('LGPL-2.1-or-later', 'https://www.gtk.org/'),
@@ -21,7 +25,7 @@ dependencies = {
     'e2fsprogs': ('NOASSERTION', 'https://e2fsprogs.sourceforge.net/'),
 }
 packages = [{
-    'SPDXID': 'SPDXRef-Kavrune', 'name': 'Kavrune', 'versionInfo': '0.1.0',
+    'SPDXID': 'SPDXRef-Kavrune', 'name': 'Kavrune', 'versionInfo': version,
     'downloadLocation': 'NOASSERTION', 'filesAnalyzed': False,
     'licenseConcluded': 'MIT', 'licenseDeclared': 'MIT',
     'copyrightText': 'Copyright (c) 2026 Kavrune contributors',
@@ -41,7 +45,7 @@ for name, (license_id, upstream) in dependencies.items():
     relationships.append({'spdxElementId': 'SPDXRef-Kavrune', 'relationshipType': 'DEPENDS_ON', 'relatedSpdxElement': identifier})
 document = {
     'spdxVersion': 'SPDX-2.3', 'dataLicense': 'CC0-1.0', 'SPDXID': 'SPDXRef-DOCUMENT',
-    'name': 'Kavrune-0.1.0-direct-runtime-inventory',
+    'name': f'Kavrune-{version}-direct-runtime-inventory',
     'documentNamespace': 'https://spdx.org/spdxdocs/kavrune-' + str(uuid.uuid4()),
     'creationInfo': {'created': datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), 'creators': ['Tool: Kavrune direct dependency inventory']},
     'comment': 'Direct system dependency inventory only. Does not enumerate transitive graphics dependencies, build tools or package contents. Not a completed license or vulnerability audit.',

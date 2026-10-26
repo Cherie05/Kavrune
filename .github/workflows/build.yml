@@ -44,7 +44,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y \
             build-essential cmake pkg-config libgtk-4-dev libadwaita-1-dev \
-            libssl-dev libglib2.0-dev-bin xvfb xauth dbus-x11 \
+            libssl-dev libglib2.0-dev-bin libseccomp2 xvfb xauth dbus-x11 \
             qemu-system-x86 seabios dpkg-dev file appstream desktop-file-utils
       - name: Desktop metadata
         run: |
@@ -70,17 +70,29 @@ jobs:
         if: matrix.sanitizers == 'OFF'
         working-directory: build
         run: cpack -G DEB
-      - name: Verify extracted package and offline notices
+      - name: Verify extracted package, payload lifecycle and guarded offline operation
         if: matrix.sanitizers == 'OFF'
         run: |
           for package in build/*.deb; do
-            python3 scripts/check-package.py "$package" --self-test
+            python3 scripts/check-package.py "$package" --self-test --offline --report build/offline-package-check.json
           done
+      - name: Create scoped dependency inventory and unsigned release provenance
+        if: matrix.sanitizers == 'OFF'
+        run: |
+          python3 scripts/sbom.py build/sbom.spdx.json
+          python3 scripts/release-manifest.py --output build/release-manifest.json build/kavrune_*.deb build/sbom.spdx.json build/offline-package-check.json
+          cd build
+          sha256sum kavrune_*.deb sbom.spdx.json offline-package-check.json release-manifest.json > SHA256SUMS
       - name: Upload development package
         if: matrix.sanitizers == 'OFF'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: kavrune-ubuntu-24.04-development
-          path: build/*.deb
+          path: |
+            build/*.deb
+            build/sbom.spdx.json
+            build/offline-package-check.json
+            build/release-manifest.json
+            build/SHA256SUMS
           if-no-files-found: error
           retention-days: 14

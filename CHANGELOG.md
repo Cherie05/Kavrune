@@ -2,6 +2,10 @@
 
 ## 0.1.0 — Unreleased development preview
 
+- Apply the complete desktop checklist through permanent product requirements/standards, architecture, privacy/legal inventory, test and release plans, and an assessment of all 25 sections and 24 release gates.
+- Add bounded UTC/severity diagnostic history, safe reload/export/confirmed clearing in Activity and CLI, current-version reports, Unicode/control sanitization and interprocess safety tests. Synchronize privacy notices with size retention and user data controls.
+- Improve persistent/accessibility labels, native reduced motion and best-effort active-job suspend/logout inhibition. Embed third-party notices and support information beside the legal documents.
+- Verify normal and extracted builds with process-local internet socket denial, record provisional smoke timing/RSS, check disposable payload lifecycle and metadata/version consistency, and generate unsigned source/artifact integrity manifests. Provide an optional manual signing command for an existing publisher key; no keys or signatures are created automatically.
 - Add Terms and Privacy notices and an offline Legal & privacy reader in Help/About with document switching, text selection, search, keyboard shortcuts and compact layouts; keep MIT rights and preview/warranty limits clear.
 - Prevent optional event logging from blocking on substituted FIFOs or a competing log writer, and reject backup destinations moved or replaced during saving before reporting success.
 - Verify new Debian packages by extraction without installation, including current guides/notices, embedded legal documents, executable hardening and the CLI safe self-test; add desktop metadata/package checks to CI and record the production audit.

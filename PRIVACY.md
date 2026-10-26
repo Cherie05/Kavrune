@@ -1,6 +1,6 @@
 # Privacy notice
 
-Applies to the Kavrune 0.1 preview application in this repository. Last updated: 18 October 2026.
+Applies to the Kavrune 0.1 preview application in this repository. Last updated: 26 October 2026.
 
 Kavrune has no accounts, advertising, analytics, telemetry, automatic crash reporting, image downloader or automatic upload feature. Its application code does not send images, drive contents, logs or usage reports to the maintainers. You do not need an internet connection to write an image already available on your computer.
 
@@ -20,18 +20,22 @@ The system authorization dialog belongs to your system's Polkit agent. Kavrune d
 
 ## Local activity records
 
-The desktop writes operation events, results, errors and drive-discovery diagnostics. The command-line application records completed commands. Records may include timestamps, local paths, filenames, device identifiers, protection reasons and image checksums. Kavrune does not deliberately write image or drive contents into the event log, but filenames and errors can themselves contain private information.
+The desktop writes operation events, results, errors and drive-discovery diagnostics. The command-line application records successful write, format, backup and scan commands; inspect, checksum, simulation, self-test and diagnostics commands do not append operation records. Records may include timestamps, local paths, filenames, device identifiers, protection reasons and image checksums. New saved records use UTC timestamps and an information, warning or error level. Existing records keep their original timestamps, which earlier preview builds wrote in local time; live session lines in Activity use your local clock. Kavrune does not deliberately write image or drive contents into the event log, but filenames and errors can themselves contain private information.
 
 The log is stored at:
 
 - `$XDG_STATE_HOME/kavrune/events.log` when `XDG_STATE_HOME` is an absolute path.
 - Otherwise, `$HOME/.local/state/kavrune/events.log` when `HOME` is an absolute path.
 
-The Activity page displays the resolved path. Kavrune requests owner-only permissions for its state directory (`0700`) and log file (`0600`), rejects unsafe links and ownership, and does not encrypt the log. These permissions do not prevent access by your account, an administrator, backup software or a compromised system.
+The Activity page displays the resolved path. Kavrune requests owner-only permissions for its state directory (`0700`) and log files (`0600`), rejects unsafe links and ownership, and does not encrypt the log. These permissions do not prevent access by your account, an administrator, backup software or a compromised system.
 
-The event log persists after closing the application. This preview has no automatic log expiry or rotation and no logging opt-out setting. To remove saved activity, finish any operation, close Kavrune, and delete **only `events.log`** at the path shown in Activity using your file manager. The next logged event creates a new file. Ordinary deletion does not guarantee forensic erasure or remove copies already made by backup or synchronization software.
+Saved activity persists after closing the application. Each event record is limited to 8 KiB. Kavrune rotates by size, retaining a current `events.log` and one previous `events.log.1`, each at most 256 KiB when maintained by the application. An oversized existing log is read through a bounded tail and trimmed at the next rotation. There is no age-based expiry and no logging opt-out setting. A private, empty `.events.lock` file coordinates access between processes. Optional diagnostics fail promptly when another process holds a diagnostics lock; a logging failure does not turn a completed USB operation into a failure.
 
-The Activity view contains events from the current session. Choosing **Copy activity** copies that text to the desktop clipboard; it does not send a report. Choosing **Copy checksum** likewise copies the selected checksum. Clipboard history or other software on your desktop may retain copied text.
+The Activity page can inspect retained local records and current session activity. **Reload saved activity** reloads the saved records. **Save diagnostics to file…** saves a report to a new file you choose, including the application version and the retained records. Existing files are never overwritten. Exported reports request owner-only file permissions, are not encrypted, and can still contain private paths, device details and checksums. Review and redact a report before sharing it. The application does not upload it.
+
+After finishing an operation, choose **Clear saved activity…** to clear both saved log generations and the current Activity view. Future operations create new records. The command-line `kavrune-cli diagnostics --clear --confirm clear` command likewise clears retained records; `kavrune-cli diagnostics` displays them and `kavrune-cli diagnostics --export FILE` saves a new report. Clearing does not delete exported reports, copies on other systems, clipboard history or system-service logs, and does not guarantee forensic erasure. Package removal preserves your local diagnostics; clear them before uninstalling if you want to remove those records.
+
+Choosing **Copy activity** copies the displayed text to the desktop clipboard; it does not send a report. Choosing **Copy checksum** likewise copies the selected checksum. Clipboard history or other software on your desktop may retain copied text.
 
 ## Images, backups and temporary test files
 

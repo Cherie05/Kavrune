@@ -1,5 +1,7 @@
 # Kavrune production audit — 18 October 2026
 
+Historical assessment for the 18 October revision. The [26 October standards assessment](STANDARDS_ASSESSMENT.md) records later diagnostics, accessibility, offline and release improvements, including size-based log rotation and clearing/export. Historical counts and retention findings below describe the earlier build, not current behavior.
+
 **Decision: development preview; not yet qualified for general production or enterprise deployment.** The notices and verified fixes below improve the current application. They do not complete the hardware, firmware, distribution, independent security or legal acceptance work required for a supported release.
 
 ## Scope and evidence

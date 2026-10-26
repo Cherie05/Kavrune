@@ -1,5 +1,7 @@
 # Architecture
 
+The [root architecture summary](../ARCHITECTURE.md) and [desktop standards assessment](STANDARDS_ASSESSMENT.md) document current trust boundaries and release scope. Diagnostics now use a stable private process lock and bounded current/previous logs; reload/export/clear share the same safe core API. Generated build-version data comes from CMake. Release checks exercise local temporary-file and private-display workflows with process-level network denial; no server is introduced.
+
 ```mermaid
 flowchart TD
   GUI[GTK4 / libadwaita desktop] --> Core[Original C++20 image and streaming engine]
