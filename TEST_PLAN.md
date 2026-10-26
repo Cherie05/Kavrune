@@ -14,7 +14,7 @@ Automated writes use generated temporary regular files, never attached drives. F
 | Packaging | Current notices/resources; no unsafe links/permissions/privileged bits or developer RPATH; hardened ELF; version consistency; self-test and disposable payload lifecycle | `scripts/package.sh` and `scripts/check-package.py`. Extraction/overlay/removal is distinct from real package-manager installation. |
 | Performance | Provisional local UI smoke completes within 10 seconds including its deliberate 2-second delay, peak RSS below 512 MiB; local safe-test bounded runtime | Offline report records host measurements. UI event latency <100 ms, settled idle CPU <1%, cold useful UI <3 seconds and low-memory behavior are targets requiring baseline hardware measurements, not inferred from smoke. |
 | Boot | Original 4 MiB synthetic BIOS fixture emits exact marker with unchanged backing file | Optional `scripts/test-boot.sh`; distribution/UEFI/Secure Boot remain separate. |
-| Source release | Policies/standards/docs present, no generated/private artifacts, matching source/artifact fingerprint and checksums | `scripts/check-repository.py`; final manifest/checksums. |
+| Source release | Policies/standards/docs present, no generated/private artifacts, GitHub noreply author and committer throughout complete HEAD ancestry, matching source/artifact fingerprint and checksums | `scripts/check-repository.py --staged --history`; `python3 tests/test_repository_privacy.py` uses disposable Git histories; final manifest/checksums. Hosted legacy PR/cache refs and build records need separate review. |
 
 ## Required manual/disposable environment cases
 

@@ -22,7 +22,7 @@ The [publishing instructions](PUBLISHING.md) use a feature branch and tested PR 
 
 CI dependency installation retains the GitHub runner's existing Ubuntu HTTPS archive fallbacks and archive signing keys while omitting its slow Azure HTTP mirror entry. Download retries and socket timeouts are explicit; all required checks remain enabled. This changes only ephemeral CI runners, not a user's package sources. The mirror-file format follows [GitHub's runner image configuration](https://github.com/actions/runner-images/blob/main/images/ubuntu/scripts/build/configure-apt-sources.sh).
 
-The latest baseline `main` revision `17525af3bcae66b7c2f25eafb48de52f4fe40c3f` passed [hosted CI](https://github.com/Cherie05/Kavrune/actions/runs/40268678682). This notice/guide change is submitted through a separate PR and must pass its own required checks before merging. See [BUILD_RESULTS](BUILD_RESULTS.md) for scoped software and package evidence.
+The cleaned baseline `main` revision `3f18ec5711f6dc5496b73136ddda823327fd6826` passed [hosted CI](https://github.com/Cherie05/Kavrune/actions/runs/40354783350). The approved metadata-only history normalization preserved every file tree and restored branch/tag protections. The [publication privacy guide](PUBLICATION_PRIVACY.md) explains the new author-and-committer check, its HEAD-only scope and remaining legacy GitHub PR/cache handling. The follow-up privacy gate must pass its own required checks. See [BUILD_RESULTS](BUILD_RESULTS.md) for scoped software and package evidence.
 
 ## Remaining work and deliberate limits
 

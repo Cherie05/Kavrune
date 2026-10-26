@@ -6,6 +6,8 @@ By default inspect indexed files and non-ignored untracked files in the working
 tree. With --staged inspect every blob in the Git index, including before the
 first commit. This is a focused hygiene check, not a complete secrets scanner
 or a licensing/security audit.
+With --history also inspect author and committer emails in the complete HEAD
+ancestry. Other branches, hosted pull-request refs and caches need a separate audit.
 """
 
 from __future__ import annotations
@@ -27,6 +29,8 @@ REQUIRED = {
     "RELEASE_CHECKLIST.md",
     "docs/STANDARDS_ASSESSMENT.md",
     "docs/REPOSITORY_REVIEW.md",
+    "docs/PUBLICATION_PRIVACY.md",
+    "tests/test_repository_privacy.py",
     ".gitignore",
     ".github/ISSUE_TEMPLATE/bug_report.yml",
     ".github/ISSUE_TEMPLATE/feature_request.yml",
@@ -70,6 +74,10 @@ PRIVATE_KEY = re.compile(rb"-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY---
 PERSONAL_PATH = re.compile(r"/(?:home|Users)/[^/\s\"'<>]+/|\.codex-antigravity/attachments/")
 ACCESS_TOKEN = re.compile(rb"\b(?:gh[opusr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{50,}|AKIA[0-9A-Z]{16})\b")
 SELF = "scripts/check-repository.py"
+NOREPLY_EMAIL = re.compile(
+    rb"(?:[0-9]+\+)?[A-Za-z0-9][A-Za-z0-9-]*(?:\[bot\])?@users\.noreply\.github\.com\Z",
+    re.IGNORECASE,
+)
 
 
 def git(root: Path, *arguments: str) -> bytes:
@@ -153,13 +161,40 @@ def check(root: Path, staged: bool) -> tuple[int, list[str]]:
     return len(files), errors
 
 
+def check_history(root: Path) -> tuple[int, list[str]]:
+    """Check HEAD ancestry, never printing the rejected address."""
+    try:
+        if git(root, "rev-parse", "--is-shallow-repository").strip() != b"false":
+            raise ValueError("Full Git history is required for identity checks; fetch without a depth limit.")
+        records = git(root, "log", "HEAD", "--format=%H%x00%ae%x00%ce").splitlines()
+    except subprocess.CalledProcessError as error:
+        raise ValueError("Cannot inspect identities without complete committed Git history.") from error
+    errors = []
+    for record in records:
+        fields = record.split(b"\0")
+        if len(fields) != 3:
+            raise ValueError("Cannot parse Git identity metadata safely.")
+        oid, author, committer = fields
+        for role, email in (("author", author), ("committer", committer)):
+            if email.lower() != b"noreply@github.com" and not NOREPLY_EMAIL.fullmatch(email):
+                errors.append(
+                    f"{oid[:12].decode('ascii')}: {role} email must use a GitHub noreply identity "
+                    "(address omitted); review Git identity settings before publication."
+                )
+    return len(records), errors
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--staged", action="store_true", help="inspect all Git index contents rather than working files")
+    parser.add_argument("--history", action="store_true", help="require complete HEAD ancestry with GitHub noreply author and committer emails")
     arguments = parser.parse_args()
     root = Path(__file__).resolve().parent.parent
     try:
         count, errors = check(root, arguments.staged)
+        if arguments.history:
+            commits, identity_errors = check_history(root)
+            errors.extend(identity_errors)
     except (OSError, subprocess.CalledProcessError, ValueError) as error:
         print(f"Repository check could not run: {error}", file=sys.stderr)
         return 2
@@ -171,6 +206,8 @@ def main() -> int:
     selection = "Git index" if arguments.staged else "working tree publication candidates"
     print(f"Repository publication check passed: {count} files in {selection}.")
     print("No generated artifacts, former branding, or detected private material were selected.")
+    if arguments.history:
+        print(f"HEAD identity check passed: {commits} commits; both author and committer use GitHub noreply.")
     return 0
 
 

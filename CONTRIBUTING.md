@@ -33,6 +33,8 @@ Automated write tests must use newly created temporary regular files. Do not poi
 
 ## Pull requests
 
+Use your GitHub-provided noreply address for both commit author and committer emails. CI checks complete HEAD ancestry and omits rejected addresses from its output. Run `python3 scripts/check-repository.py --staged --history` before publication and follow [publication privacy](docs/PUBLICATION_PRIVACY.md), including fresh-clone guidance after a history cleanup. This preserves public contributor names and license attribution.
+
 Create a branch from `main`, keep the change focused and open a pull request against `main`. Describe the problem, resulting behavior, validation performed and any remaining limits. Add meaningful regression coverage for storage or parser behavior, update affected documentation, and ensure required CI checks pass. Do not claim successful hardware validation based on regular-file tests.
 
 Follow the existing C++ style, prefer bounded operations and explicit errors, and keep privileged work in the documented UDisks2/Polkit interfaces. Avoid adding shell execution, internal-disk overrides or silently relaxed safety checks.
