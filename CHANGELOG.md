@@ -4,6 +4,7 @@
 
 - Make beta/development status and possible data loss, broken media and device/system damage explicit in project notices while preserving the MIT license and applicable-law qualifications. Add a user installation, verification, safe-test, update and removal guide; keep PPA setup deferred.
 - Align contributor publishing instructions with protected-branch PR requirements and extend ignored local credential/crash files.
+- Use the GitHub runner's existing Ubuntu HTTPS archive fallbacks with APT download timeouts/retries after observing very slow Azure HTTP dependency downloads. Keep archive signature verification and all required tests enabled.
 
 Future work is tracked in [ROADMAP.md](docs/ROADMAP.md). The current downloadable preview is recorded below.
 

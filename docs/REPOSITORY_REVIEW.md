@@ -20,6 +20,8 @@ Bug/feature issue forms, private vulnerability form, issue contact links, a PR t
 
 The [publishing instructions](PUBLISHING.md) use a feature branch and tested PR for updates, matching the official repository's protected `main` policy. The private vulnerability form's required fields and minimum proof-of-concept length match [GitHub's documented private-report form support](https://docs.github.com/en/code-security/how-tos/report-and-fix-vulnerabilities/configure-vulnerability-reporting/configure-for-a-repository); no test vulnerability report was submitted.
 
+CI dependency installation retains the GitHub runner's existing Ubuntu HTTPS archive fallbacks and archive signing keys while omitting its slow Azure HTTP mirror entry. Download retries and socket timeouts are explicit; all required checks remain enabled. This changes only ephemeral CI runners, not a user's package sources. The mirror-file format follows [GitHub's runner image configuration](https://github.com/actions/runner-images/blob/main/images/ubuntu/scripts/build/configure-apt-sources.sh).
+
 The latest baseline `main` revision `17525af3bcae66b7c2f25eafb48de52f4fe40c3f` passed [hosted CI](https://github.com/Cherie05/Kavrune/actions/runs/40268678682). This notice/guide change is submitted through a separate PR and must pass its own required checks before merging. See [BUILD_RESULTS](BUILD_RESULTS.md) for scoped software and package evidence.
 
 ## Remaining work and deliberate limits
