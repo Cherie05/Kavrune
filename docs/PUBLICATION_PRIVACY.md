@@ -13,7 +13,7 @@ git var GIT_COMMITTER_IDENT
 
 If either is wrong, set `git config --local user.email` to your actual GitHub noreply address and check environment overrides as well. Review existing commits separately: changing the setting does not change past author or committer data. Do not paste private identity output into public issues or logs.
 
-Stage only intended changes, then check the selected source and complete current branch ancestry:
+Stage only intended changes and review the effective identities before committing. After creating a commit, check the selected source and complete current branch ancestry before every push:
 
 ```sh
 python3 tests/test_repository_privacy.py
@@ -23,6 +23,8 @@ python3 scripts/check-repository.py --staged --history
 The history check accepts GitHub user/bot noreply addresses and GitHub's own `noreply@github.com` committer identity. It reports the commit and affected role without printing a rejected address. It checks both fields, earlier ancestors and the complete history; it refuses a shallow clone. CI fetches full history for this check. Ordinary publication still uses a protected-branch PR and required checks.
 
 The guard checks HEAD ancestry. It does not scan every remote branch, GitHub's retained PR refs, Actions run metadata, release payload, screenshot metadata or cached/deleted object. Audit those surfaces separately before claiming that a public project is free of personal information. It does not anonymize account/display names or replace a general secrets scanner.
+
+CI runs after a push, so a rejected commit may already be public. Run the local check after committing and before uploading; an earlier check cannot inspect a commit that does not exist yet. Audit other refs separately if pushing multiple branches or tags. Cloning does not automatically install a local Git hook.
 
 ## Existing public information
 
