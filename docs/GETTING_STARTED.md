@@ -2,7 +2,7 @@
 
 Kavrune turns a supported Linux installer file into a USB installer. An **ISO** is a file containing an operating system's installation media. A USB installer can start a computer and offer an operating system installation; copying an ISO onto a USB as an ordinary file does not do this.
 
-Version 0.1 is a development preview. Start with the safe test below. For a physical trial, use a spare USB with no important files, and keep independent backups. Read the [disclaimer](../DISCLAIMER.md) before changing a drive.
+Version 0.1 is a beta development preview under active development. Start with [installation instructions](../INSTALL.md), then the safe test below. For a physical trial, use a spare USB with no important files, and keep independent backups. Read the [disclaimer](../DISCLAIMER.md) before changing a drive.
 
 ## Try the app without a USB
 

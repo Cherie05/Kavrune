@@ -40,9 +40,15 @@ _CPack_Packages/
 *.p12
 *.pfx
 credentials.json
+.netrc
+.gnupg/
 
 # Logs, caches, and editor/OS state
 *.log
+*.core
+*.dmp
+/core
+/core.[0-9]*
 __pycache__/
 *.py[cod]
 .cache/

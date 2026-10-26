@@ -6,7 +6,7 @@
 
 The official repository is public. Its About description, release homepage and topics are configured. Private vulnerability reporting, dependency alerts/security updates, secret scanning and secret push protection were verified enabled. These hosted settings can change; check their actual state rather than assuming a copied configuration enables them.
 
-The protected `main` branch requires a pull request, resolved review conversations and current successful `Repository hygiene`, `Linux (sanitizers OFF)` and `Linux (sanitizers ON)` checks from GitHub Actions. Protection applies to administrators, with zero mandatory approvals so a sole maintainer can merge their own tested PR. Force pushes and branch deletion are blocked. Publish subsequent source changes through a branch and PR; the direct-push command below applies only where repository policy permits it.
+The protected `main` branch requires a pull request, resolved review conversations and current successful `Repository hygiene`, `Linux (sanitizers OFF)` and `Linux (sanitizers ON)` checks from GitHub Actions. Protection applies to administrators, with zero mandatory approvals so a sole maintainer can merge their own tested PR. Force pushes and branch deletion are blocked. Publish subsequent source changes through a branch and PR as described below.
 
 Version tags matching `v*` are protected against updates and deletion. Publish a new version instead of moving an existing release tag. Automatic deletion of merged branches and the PR branch-update control are enabled. Existing issue/PR templates, MIT, conduct, contribution and security files remain available. No paid service or signing identity was created.
 
@@ -14,9 +14,17 @@ The release is explicitly a pre-release. Passing CI and configuring GitHub do no
 
 ## Repository location
 
-The project repository is [Cherie05/Kavrune](https://github.com/Cherie05/Kavrune). This checkout is on `main`, with `origin` configured as `https://github.com/Cherie05/Kavrune.git`. The application remains a 0.1 development preview after publication. A configured remote does not mean every local change has been pushed or that hosted security settings have been enabled.
+The project repository is [Cherie05/Kavrune](https://github.com/Cherie05/Kavrune). Its default branch is `main`, with `origin` configured as `https://github.com/Cherie05/Kavrune.git`. The application remains a 0.1 beta development preview after publication. A configured remote does not mean every local change has been pushed or that hosted security settings have been enabled.
 
 ## Update the existing repository
+
+Before editing, start from a clean checkout, update `main` and create a branch with a name describing your change:
+
+```sh
+git switch main
+git pull --ff-only
+git switch -c describe-your-change
+```
 
 Before committing or pushing, check the working tree, latest commit and remote. Generated files should remain ignored, and commit author information should be suitable for publication:
 
@@ -28,13 +36,13 @@ git remote -v
 python3 scripts/check-repository.py
 ```
 
-Build and test the changes, review the diff, then commit the source and documentation intended for publication. With the existing `origin` pointing to the repository you intend to update:
+Build and test the changes, review the diff, then stage and commit only the source and documentation intended for publication. With the existing `origin` pointing to the repository you intend to update, push your branch:
 
 ```sh
-git push -u origin main
+git push -u origin HEAD
 ```
 
-Pushing publishes the local commits and triggers the repository's configured workflows. Check the run for the exact pushed commit; an older green run does not validate new changes.
+Open a pull request from that branch into `main` on GitHub. Pushing publishes the local commits and triggers the repository's configured workflows. Check the run for the exact PR revision; an older green run does not validate new changes. Resolve review conversations, wait for all three required checks and merge through the pull request. Do not bypass protection or push directly to the official repository's `main` branch. Check the merged revision's workflow result as well.
 
 ## Create a fork or a new repository
 

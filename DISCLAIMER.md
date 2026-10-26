@@ -1,5 +1,7 @@
 # Storage, warranty and liability notice
 
+**BETA / DEVELOPMENT PREVIEW — under active development.** Features may be unfinished or fail unexpectedly. Bugs, interrupted operations, hardware faults or operating-system failures can cause permanent data loss, corrupted or unusable media, or device/system damage. Evaluate with spare media, keep independent backups and read the notices below before confirming a storage operation.
+
 ## No warranty or liability
 
 Kavrune is provided "as is", without warranties or guarantees of any kind, as stated in the [MIT License](LICENSE). There is no warranty of merchantability, fitness for a particular purpose, reliability, uninterrupted operation or freedom from errors.
@@ -10,7 +12,7 @@ The MIT License contains the governing warranty disclaimer and limitation of lia
 
 ## Storage and development limits
 
-Kavrune 0.1 is a development preview. Physical USB qualification, the complete distribution/firmware test matrix and independent security review remain pending. It is not represented as a certified production or enterprise release. See [VALIDATION.md](docs/VALIDATION.md).
+Kavrune 0.1 is beta preview software under active development. Physical USB qualification, the complete distribution/firmware test matrix and independent security review remain pending. It is not represented as a stable, certified production or enterprise release. See [VALIDATION.md](docs/VALIDATION.md).
 
 Writing an image, restoring a backup or formatting a drive permanently replaces data on the selected target. Keep an independent backup and check the model, capacity, serial and device path shown in confirmation. Device detection, confirmation and readback verification reduce risk but cannot guarantee protection against every failure, hardware defect or operating-system race. Cancellation, unplugging, power loss and errors can leave incomplete or unusable media. Raw writing is not secure erasure.
 

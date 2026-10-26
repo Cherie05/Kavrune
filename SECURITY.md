@@ -4,7 +4,7 @@
 
 | Version | Security support |
 |---|---|
-| Latest `main` / current 0.1 development preview | Best-effort investigation and fixes |
+| Latest `main` / current 0.1 beta development preview | Best-effort investigation and fixes |
 | Older snapshots and modified third-party builds | No maintained support commitment |
 
 Kavrune has no stable release, dedicated security team or response-time SLA. Production qualification is pending; see [validation requirements](docs/VALIDATION.md). Fixes may require updating to the current preview.
