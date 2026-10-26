@@ -1,4 +1,8 @@
-# Publish Kavrune to GitHub
+# Publish Kavrune
+
+## Launchpad beta PPA
+
+The public [arunvpp/kavrune-beta archive](https://launchpad.net/~arunvpp/+archive/ubuntu/kavrune-beta) is active. At the 26 October 2026 setup check it contained no published sources and the owner had no registered upload key. Follow [LAUNCHPAD.md](LAUNCHPAD.md) for the complete public-contact, key registration, reviewed source export, signing, upload, build-status and user installation workflow. `scripts/prepare-ppa.py` generates unsigned noble/amd64 source packaging in a fresh private directory; it never creates a key, signs, installs or uploads anything. Its generated Debian revision preserves the CMake upstream version and marks the package as beta. Do not announce APT availability before a successful published build and disposable-VM installation acceptance.
 
 ## Published preview and hosted setup
 

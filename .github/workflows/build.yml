@@ -25,6 +25,8 @@ jobs:
           fetch-depth: 0
       - name: Test publication identity checks
         run: python3 tests/test_repository_privacy.py
+      - name: Test disposable PPA source packaging
+        run: python3 tests/test_ppa_packaging.py
       - name: Check publishable source
         run: python3 scripts/check-repository.py --staged --history
 
@@ -42,6 +44,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - name: Install build and test dependencies
         run: |
           # Keep the runner's Ubuntu HTTPS fallbacks and existing archive keys.
@@ -53,7 +56,7 @@ jobs:
           sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install --no-install-recommends -y \
             build-essential cmake pkg-config libgtk-4-dev libadwaita-1-dev \
             libssl-dev libglib2.0-dev-bin libseccomp2 xvfb xauth dbus-x11 \
-            qemu-system-x86 seabios dpkg-dev file appstream desktop-file-utils
+            qemu-system-x86 seabios dpkg-dev debhelper file appstream desktop-file-utils
       - name: Desktop metadata
         run: |
           desktop-file-validate data/org.kavrune.Kavrune.desktop
@@ -91,6 +94,18 @@ jobs:
           python3 scripts/release-manifest.py --output build/release-manifest.json build/kavrune_*.deb build/sbom.spdx.json build/offline-package-check.json
           cd build
           sha256sum kavrune_*.deb sbom.spdx.json offline-package-check.json release-manifest.json > SHA256SUMS
+      - name: Build and verify Ubuntu PPA source and binary packaging
+        if: matrix.sanitizers == 'OFF'
+        run: |
+          python3 scripts/prepare-ppa.py --maintainer-name 'Kavrune CI Fixture' --maintainer-email packaging@example.invalid --output build/ppa-validation
+          cd build/ppa-validation/kavrune-*
+          dpkg-buildpackage -S -sa --no-sign
+          cd ..
+          dpkg-source --no-check -x ./*.dsc roundtrip
+          cd roundtrip
+          DEB_BUILD_OPTIONS=parallel=2 dpkg-buildpackage -b --no-sign
+          cd ../../..
+          python3 scripts/check-package.py build/ppa-validation/kavrune_*_amd64.deb --debian-revision 0ubuntu1~beta1~noble1 --self-test --offline --report build/ppa-validation/offline-report.json
       - name: Upload development package
         if: matrix.sanitizers == 'OFF'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

@@ -26,7 +26,7 @@ The cleaned baseline `main` revision `3f18ec5711f6dc5496b73136ddda823327fd6826` 
 
 ## Remaining work and deliberate limits
 
-- PPA/Launchpad account, maintainer identity and signing setup are deferred at the maintainer's request. No PPA, upload, signing key or public contact was created. Fresh installations use the release's local `.deb`; an APT repository has not been published.
+- Launchpad account and the public `arunvpp/kavrune-beta` PPA were observed active on 26 October 2026, with no published source packages or registered upload key. Source packaging and an [end-to-end publication guide](LAUNCHPAD.md) are provided; actual signing, accepted upload, published target build and clean-VM APT installation are separate gates. The historical GitHub release's local `.deb` remains available.
 - Publisher signing remains pending; current release checksum/provenance records are unsigned and provide integrity, not independent publisher authentication.
 - Real USB authorization, formatting, backup/restore, removal/power-loss recovery, clean installation, supported distro/firmware acceptance, complete accessibility and independent parser/storage security review remain required before production qualification.
 - Direct-runtime SPDX inventory and GitHub dependency alerts do not cover every transitive/native dependency or establish complete license/CVE compliance.

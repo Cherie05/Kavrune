@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased packaging work
+
+- Add an unsigned Launchpad source preparation helper and a complete beta PPA publishing guide. Target Ubuntu 24.04 noble/amd64, require an explicit public maintainer contact and preserve the CMake upstream version with an incremented beta packaging revision. Preparation does not create keys, sign or upload.
+- Add disposable source-package round-trip and version-ordering regressions, plus hosted debhelper binary/offline validation. Original preview release assets remain unchanged; PPA publication and real APT installation require separate observed acceptance.
+
 ## Unreleased
 
 - Normalize canonical Git identity metadata with maintainer approval while preserving every file tree and original preview artifact bytes. Add a full-history publication check for both author and committer noreply emails, eight disposable-Git regressions and privacy/re-clone guidance. Legacy GitHub PR/cache references need separate platform handling.

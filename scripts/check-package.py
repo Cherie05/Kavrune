@@ -89,14 +89,23 @@ def payload_lifecycle(package: Path, extracted: Path, temporary: Path) -> None:
     intact()
 
 
-def check(package: Path, root: Path, self_test: bool, offline: bool, report: Path | None) -> None:
+def expected_package_version(upstream: str, revision: str | None) -> str:
+    if revision is None:
+        return upstream
+    if not re.fullmatch(r"[0-9][A-Za-z0-9+.~]*", revision):
+        raise ValueError("Invalid Debian revision; supply only the revision after the upstream version.")
+    return upstream + "-" + revision
+
+
+def check(package: Path, root: Path, self_test: bool, offline: bool, report: Path | None,
+          debian_revision: str | None = None) -> None:
     if run("dpkg-deb", "-f", str(package), "Package").strip() != "kavrune":
         raise ValueError("The package is not Kavrune.")
     version_match = re.search(r"project\(Kavrune VERSION ([0-9.]+)", (root / "CMakeLists.txt").read_text())
     if not version_match:
         raise ValueError("Cannot determine the source version.")
     version = version_match.group(1)
-    if run("dpkg-deb", "-f", str(package), "Version").strip() != version:
+    if run("dpkg-deb", "-f", str(package), "Version").strip() != expected_package_version(version, debian_revision):
         raise ValueError("The package version differs from the source version.")
     inspect_archive(package)
     with tempfile.TemporaryDirectory(prefix="kavrune-package-check-") as folder:
@@ -198,12 +207,13 @@ def main() -> int:
     parser.add_argument("--self-test", action="store_true", help="also run the native extracted CLI temporary-file self-test")
     parser.add_argument("--offline", action="store_true", help="test extracted CLI and private-display desktop with process network sockets denied")
     parser.add_argument("--report", type=Path, help="write the --offline evidence and performance report as JSON")
+    parser.add_argument("--debian-revision", help="require this exact Debian packaging revision; upstream/binary versions must still match CMake")
     args = parser.parse_args()
     try:
         if args.report and not args.offline:
             raise ValueError("--report requires --offline.")
         check(args.package.resolve(strict=True), Path(__file__).resolve().parent.parent,
-              args.self_test, args.offline, args.report)
+              args.self_test, args.offline, args.report, args.debian_revision)
     except Unsupported as error:
         print(f"SKIP: {error}", file=sys.stderr)
         return 77

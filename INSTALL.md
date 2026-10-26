@@ -9,7 +9,7 @@
 - Use a normal graphical Linux session with UDisks2 and a Polkit authentication agent. The installer declares the required runtime dependencies.
 - Internet may be needed to download the installer and dependencies. Local application operations work offline after installation.
 
-Users do not need Git, a compiler or a GitHub account. An APT repository/PPA has not been published for this project; use the downloaded `.deb` file below. PPA setup is deferred.
+Users do not need Git, a compiler or a GitHub account. The [beta PPA](https://launchpad.net/~arunvpp/+archive/ubuntu/kavrune-beta) was activated, but no package publication was observed at the 26 October 2026 setup check. Until a compatible package is published and installation-tested, use the downloaded `.deb` below. Maintainers can follow the [complete Launchpad guide](docs/LAUNCHPAD.md); an empty PPA does not make `apt install kavrune` available.
 
 ## Download and check the installer
 
