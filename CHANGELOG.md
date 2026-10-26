@@ -1,6 +1,12 @@
 # Changelog
 
-## 0.1.0 — Unreleased development preview
+## Unreleased
+
+Future work is tracked in [ROADMAP.md](docs/ROADMAP.md). The current downloadable preview is recorded below.
+
+## 0.1.0 Preview 1 — 26 October 2026
+
+Published as [v0.1.0-preview.1](https://github.com/Cherie05/Kavrune/releases/tag/v0.1.0-preview.1), with package version `0.1.0`. The release contains the Ubuntu 24.04 amd64 CI build, exact-commit source archive, scoped dependency inventory, offline report and unsigned integrity/provenance records.
 
 - Add release download/install guidance and direct links to the official repository's enabled private vulnerability reporting channel.
 - Keep the application alive until background drive discovery returns, including after closing the last window, to prevent shutdown from racing storage cleanup. Test successful and failed discovery against the actual application loop with synthetic metadata.
@@ -32,4 +38,4 @@
 - Add MIT licensing, third-party notices, security reporting guidance, storage disclaimer, contribution and conduct policies, GitHub templates and repository ignore rules.
 - Describe Kavrune independently and make no-warranty and damage-liability notices explicit in the README, NOTICE and disclaimer, subject to applicable law and the MIT License.
 
-This entry describes preview functionality and repository preparation, not a published stable release. Physical USB and production qualification remain pending. Windows installer preparation, persistence and other later features are tracked in [ROADMAP.md](docs/ROADMAP.md).
+This is a published development preview, not a stable release. Physical USB and production qualification remain pending. Windows installer preparation, persistence and other later features are tracked in [ROADMAP.md](docs/ROADMAP.md).
