@@ -2,6 +2,16 @@
 
 **Status: beta development preview, under active development.** This is a focused review of repository files, user instructions and GitHub settings. It is not an independent storage security audit, legal opinion, trademark clearance or guarantee against data loss.
 
+## Publication hygiene update — 27 October 2026
+
+The 87 selected source files and reachable local Git history were reviewed again. Gitleaks 8.30.1 reported no detected secrets in the publication snapshot or reachable history; targeted checks found no private-key blocks, account-confirmation links, personal home paths or the approved package-contact address in the source snapshot. The seven tracked PNG files contained no text/EXIF metadata chunks. These are scoped observations, not a guarantee that no private information exists on every hosted or external surface.
+
+The guard now rejects armored OpenPGP/encrypted private-key markers and Launchpad confirmation links without echoing their contents. Expanded ignore rules exclude key exports/keyrings and source-upload artifacts; force-added files remain subject to the guard. All 12 disposable privacy tests and eight source-packaging tests passed locally. GitHub secret scanning and push protection were enabled with no open secret-scanning alerts at this check.
+
+Seven stale ignored build/audit folders were archived outside the checkout under owner-only access. The primary build, local SDK, current installer and immutable accepted source archives remain local and excluded from Git; required project, license, security, contribution and GitHub files remain in the source selection.
+
+Closed GitHub PRs [#1](https://github.com/Cherie05/Kavrune/pull/1) and [#2](https://github.com/Cherie05/Kavrune/pull/2) still retain earlier personal commit metadata. Their retained refs and cached copies are outside a normal branch push; the earlier canonical-history cleanup did not erase them. No new history rewrite or claim of complete GitHub-side removal is made. See [publication privacy](PUBLICATION_PRIVACY.md).
+
 ## User notices and instructions
 
 - [README](../README.md), [NOTICE](../NOTICE), [DISCLAIMER](../DISCLAIMER.md), [TERMS](../TERMS.md), [SUPPORT](../SUPPORT.md) and [CONTRIBUTING](../CONTRIBUTING.md) identify the beta/development status. Notices describe unfinished features, failures, permanent data loss, broken/corrupted media and device/system damage.

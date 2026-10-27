@@ -9,7 +9,7 @@
 - Use a normal graphical Linux session with UDisks2 and a Polkit authentication agent. The installer declares the required runtime dependencies.
 - Internet may be needed to download the installer and dependencies. Local application operations work offline after installation.
 
-Users do not need Git, a compiler or a GitHub account. The [beta PPA](https://launchpad.net/~arunvpp/+archive/ubuntu/kavrune-beta) was activated, but no package publication was observed at the 26 October 2026 setup check. Until a compatible package is published and installation-tested, use the downloaded `.deb` below. Maintainers can follow the [complete Launchpad guide](docs/LAUNCHPAD.md); an empty PPA does not make `apt install kavrune` available.
+Users do not need Git, a compiler or a GitHub account. The [beta PPA](https://launchpad.net/~arunvpp/+archive/ubuntu/kavrune-beta) is active, but no published binary was observed at the 27 October 2026 check. The Ubuntu 26.04 source was accepted but its hosted build failed without an available log; the Ubuntu 24.04 build was still uploading results. A separate isolated local Ubuntu 26.04 build passed all nine tests and package/offline checks, which does not establish PPA publication or full installation qualification. Until a compatible package is published and installation-tested, use a reviewed compatible local/downloaded `.deb`. Maintainers can follow the [complete Launchpad guide](docs/LAUNCHPAD.md); an active PPA alone does not make `apt install kavrune` available.
 
 ## Download and check the installer
 
@@ -77,7 +77,9 @@ Your ISO files, backups, exported reports and local diagnostics remain. If desir
 
 ## Installation problems
 
-- **Unable to locate package kavrune:** use the downloaded file command, including `./` and the complete `.deb` filename. No project APT repository/PPA is published yet.
+- **Unable to locate package kavrune:** APT needs a configured PPA and a published binary for your Ubuntu suite. Ubuntu 24.04 uses `noble`; Ubuntu 26.04 uses `resolute` and needs its own build. See [PPA troubleshooting](docs/LAUNCHPAD.md#ppa-installation-troubleshooting). Until a compatible PPA package is available, use the downloaded file command with `./` and the complete compatible `.deb` filename.
+- **`GPGKeyTemporarilyNotFoundError` while adding the PPA:** Launchpad could not supply its archive-signing key. Wait for its key generation/propagation to finish before retrying. Your source-upload key and the PPA's APT key are separate; keep package signature verification enabled.
+- **HTTP 403 for the PPA's `InRelease`, then “repository is not signed”:** the signed index could not be downloaded. Disable the unusable source with `sudo add-apt-repository --remove --no-update ppa:arunvpp/kavrune-beta`, then run `sudo apt update`. Follow [publication troubleshooting](docs/LAUNCHPAD.md#ppa-installation-troubleshooting) before re-enabling it; an archive key alone does not make a package available.
 - **Installer file not found:** open Terminal in the folder where the browser saved the file. Use its actual filename if the browser added a suffix.
 - **Wrong architecture or unavailable dependencies:** check the Linux release and CPU architecture. Do not force-install incompatible packages or replace system libraries to bypass the error; report the environment through [SUPPORT.md](SUPPORT.md).
 - **The app refuses to run as root:** open it from the application menu or run `kavrune` without `sudo`.
