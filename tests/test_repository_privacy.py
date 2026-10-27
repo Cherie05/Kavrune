@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location("repository_check", ROOT / "scripts/check-repository.py")
@@ -102,6 +103,84 @@ class IdentityChecks(unittest.TestCase):
         _, errors = CHECK.check_history(self.root)
         self.assertEqual(len(errors), 1)
         self.assertNotIn(PRIVATE, errors[0])
+
+
+class PublicationContentChecks(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix="kavrune-source-privacy-")
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.env = os.environ.copy()
+        for name in tuple(self.env):
+            if name.startswith(("GIT_AUTHOR_", "GIT_COMMITTER_")) or name in (
+                "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR"
+            ):
+                self.env.pop(name)
+        self.env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull)
+        self.git("init", "-q")
+        (self.root / ".gitignore").write_bytes((ROOT / ".gitignore").read_bytes())
+
+    def git(self, *args):
+        return subprocess.check_output(
+            ["git", "-C", str(self.root), *args], env=self.env, stderr=subprocess.PIPE
+        )
+
+    def check(self, staged):
+        # Required project documents are independent of these content fixtures.
+        with mock.patch.object(CHECK, "REQUIRED", set()):
+            return CHECK.check(self.root, staged)
+
+    def test_private_key_markers_are_rejected_without_echoing_content(self):
+        path = self.root / "fixture.txt"
+        for kind in (b"RSA PRIVATE KEY", b"ENCRYPTED PRIVATE KEY", b"OPENSSH PRIVATE KEY", b"PGP PRIVATE KEY BLOCK"):
+            with self.subTest(kind=kind):
+                payload = b"-----BEGIN " + kind + b"-----\nfixture material only\n"
+                path.write_bytes(payload)
+                self.git("add", "fixture.txt")
+                for staged in (False, True):
+                    _, errors = self.check(staged)
+                    self.assertTrue(any("private key material" in error for error in errors))
+                    self.assertNotIn("fixture material only", "\n".join(errors))
+
+    def test_confirmation_link_hidden_by_unstaged_edit_is_still_rejected(self):
+        path = self.root / "fixture.txt"
+        link = b"https://launchpad.net/" + b"token/" + b"inert-fixture-only"
+        path.write_bytes(link)
+        self.git("add", "fixture.txt")
+        path.write_text("Reviewed source without account links.\n")
+        _, errors = self.check(True)
+        self.assertTrue(any("account-confirmation link" in error for error in errors))
+        self.assertNotIn(link.decode(), "\n".join(errors))
+        self.assertEqual(self.check(False)[1], [])
+
+    def test_force_adding_ignored_keys_and_uploads_cannot_bypass_guard(self):
+        names = (
+            "export.asc", "pubring.kbx", "key.gpg", "agent.gpg-agent-info", "key.pem", "key.p12", "key.ppk",
+            "public.pub", ".gnupg/private-keys-v1.d/record", ".ssh/id_ed25519",
+            "openpgp-revocs.d/record", "id_ecdsa_sk", "package.dsc", "package.changes",
+            "package.buildinfo", "package.upload", "package.ddeb",
+        )
+        for name in names:
+            with self.subTest(name=name):
+                path = self.root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("Inert fixture, never a real key or credential.\n")
+                self.git("check-ignore", "-q", "--", name)
+                self.assertEqual(self.check(False)[1], [])
+                self.git("add", "-f", "--", name)
+                _, errors = self.check(True)
+                self.assertTrue(any(error.startswith(name + ":") for error in errors))
+                self.git("rm", "--cached", "-f", "--", name)
+                path.unlink()
+
+    def test_documented_signing_commands_and_placeholders_remain_allowed(self):
+        (self.root / "guide.txt").write_text(
+            "gpg --decrypt launchpad-confirmation.asc\n"
+            "gpg --keyserver hkps://keyserver.ubuntu.com --send-keys YOUR_FULL_FINGERPRINT\n"
+        )
+        self.git("add", "guide.txt")
+        self.assertEqual(self.check(False)[1], [])
+        self.assertEqual(self.check(True)[1], [])
 
 
 if __name__ == "__main__":

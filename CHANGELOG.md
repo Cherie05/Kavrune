@@ -2,6 +2,9 @@
 
 ## Unreleased packaging work
 
+- Keep key exports, keyrings and generated source-upload files out of publication, and reject armored OpenPGP/encrypted private-key markers and private account-confirmation links with redacted diagnostics. Add real Git-index and force-add regressions; preserve ordinary signing instructions and noreply-history controls.
+- Document separate Ubuntu 26.04 source rebuilds using the unchanged upstream archive, and explain pending key validation, temporary PPA archive-key lookup failures and suite-specific APT availability. Include an encryption subkey in new-key instructions so Launchpad's encrypted confirmation can be read.
+- Explain recovery from an inaccessible PPA index without weakening APT authentication. Record a successful isolated local Ubuntu 26.04 binary build and nine passing tests while keeping failed hosted builds, publication and real installation acceptance separate.
 - Add an unsigned Launchpad source preparation helper and a complete beta PPA publishing guide. Target Ubuntu 24.04 noble/amd64, require an explicit public maintainer contact and preserve the CMake upstream version with an incremented beta packaging revision. Preparation does not create keys, sign or upload.
 - Add disposable source-package round-trip and version-ordering regressions, plus hosted debhelper binary/offline validation. Original preview release assets remain unchanged; PPA publication and real APT installation require separate observed acceptance.
 

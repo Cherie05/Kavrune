@@ -67,15 +67,27 @@ REQUIRED = {
 }
 
 GENERATED_SUFFIXES = {
-    ".a", ".bin", ".deb", ".dll", ".exe", ".gz", ".img", ".iso",
-    ".o", ".pyc", ".qcow2", ".rpm", ".so", ".tar", ".xz", ".zip",
+    ".a", ".bin", ".buildinfo", ".changes", ".ddeb", ".deb", ".dll", ".dsc",
+    ".exe", ".gz", ".img", ".iso", ".o", ".pyc", ".qcow2", ".rpm", ".so",
+    ".tar", ".upload", ".xz", ".zip",
 }
 IMAGE_SUFFIXES = {".gif", ".ico", ".jpeg", ".jpg", ".png", ".webp"}
-PRIVATE_NAMES = {".netrc", "credentials.json", "id_dsa", "id_ecdsa", "id_ed25519", "id_rsa"}
+PRIVATE_NAMES = {
+    ".netrc", "credentials.json", "id_dsa", "id_ecdsa", "id_ecdsa_sk",
+    "id_ed25519", "id_ed25519_sk", "id_rsa",
+}
+KEY_SUFFIXES = {
+    ".asc", ".gpg", ".gpg-agent-info", ".kbx", ".key", ".p12", ".pem", ".pfx",
+    ".pgp", ".ppk", ".pub", ".rev",
+}
+PRIVATE_DIRECTORIES = {".gnupg", ".ssh", "openpgp-revocs.d"}
 OLD_BRANDING = re.compile(r"luminrove|asterflash", re.IGNORECASE)
-PRIVATE_KEY = re.compile(rb"-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----")
+PRIVATE_KEY = re.compile(
+    rb"-----BEGIN (?:(?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY|PGP PRIVATE KEY BLOCK)-----"
+)
 PERSONAL_PATH = re.compile(r"/(?:home|Users)/[^/\s\"'<>]+/|\.codex-antigravity/attachments/")
 ACCESS_TOKEN = re.compile(rb"\b(?:gh[opusr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{50,}|AKIA[0-9A-Z]{16})\b")
+CONFIRMATION_LINK = re.compile(rb"https?://launchpad\.net/token/[A-Za-z0-9_-]+", re.IGNORECASE)
 SELF = "scripts/check-repository.py"
 NOREPLY_EMAIL = re.compile(
     rb"(?:[0-9]+\+)?[A-Za-z0-9][A-Za-z0-9-]*(?:\[bot\])?@users\.noreply\.github\.com\Z",
@@ -109,13 +121,15 @@ def path_problem(filename: str) -> str | None:
     path = PurePosixPath(filename)
     name = path.name.lower()
     top = path.parts[0].lower()
+    if any(part.lower() in PRIVATE_DIRECTORIES for part in path.parts):
+        return "private key or credential directory"
     if top in {".deps", "dist", ".cache", ".idea", ".vscode"} or top.startswith(("build", "cmake-build")):
         return "local build, dependency, distribution, or editor file"
     if any(part in {"__pycache__", "CMakeFiles", "_CPack_Packages"} for part in path.parts):
         return "generated cache or package file"
     if path.suffix.lower() in GENERATED_SUFFIXES or name.endswith((".log", ".swp", ".swo")):
         return "generated binary, archive, device image, or local log"
-    if name in PRIVATE_NAMES or name.endswith(".key") or (name.startswith(".env") and name != ".env.example"):
+    if name in PRIVATE_NAMES or path.suffix.lower() in KEY_SUFFIXES or (name.startswith(".env") and name != ".env.example"):
         return "credential or environment file"
     if OLD_BRANDING.search(filename):
         return "former application name in path"
@@ -150,6 +164,8 @@ def check(root: Path, staged: bool) -> tuple[int, list[str]]:
             errors.append(f"{filename}: private key material")
         if ACCESS_TOKEN.search(content):
             errors.append(f"{filename}: possible access token; inspect without publishing it")
+        if CONFIRMATION_LINK.search(content):
+            errors.append(f"{filename}: private account-confirmation link (value omitted)")
         try:
             text = content.decode("utf-8")
         except UnicodeDecodeError:

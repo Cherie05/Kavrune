@@ -24,6 +24,10 @@ The history check accepts GitHub user/bot noreply addresses and GitHub's own `no
 
 The guard checks HEAD ancestry. It does not scan every remote branch, GitHub's retained PR refs, Actions run metadata, release payload, screenshot metadata or cached/deleted object. Audit those surfaces separately before claiming that a public project is free of personal information. It does not anonymize account/display names or replace a general secrets scanner.
 
+The source guard also refuses key/credential directories, key exports and generated source-upload files even if they were force-added past `.gitignore`. It detects armored OpenPGP, encrypted PKCS#8 and supported PEM/OpenSSH private-key markers, plus Launchpad account-confirmation links. Diagnostics identify the file without repeating private contents. Disposable Git tests cover a sensitive staged value hidden by a later harmless working-tree edit. These are focused safeguards; run a maintained secrets scanner against the intended source snapshot and canonical history before publication.
+
+Keep signed source uploads, raw audit backups, signing logs, local packages and private keys out of Git. Preserve original accepted source archives privately because changing their bytes under the same filename breaks later uploads. Keep any cleanup archive outside the checkout with owner-only access. Do not upload a whole development directory as an alternative to reviewing the Git file selection.
+
 CI runs after a push, so a rejected commit may already be public. Run the local check after committing and before uploading; an earlier check cannot inspect a commit that does not exist yet. Audit other refs separately if pushing multiple branches or tags. Cloning does not automatically install a local Git hook.
 
 ## Existing public information

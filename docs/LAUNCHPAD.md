@@ -26,10 +26,9 @@ These are maintainer tools. Ordinary app users do not need them, Git or a Launch
 If you already have a suitable publisher-controlled signing key, use it rather than creating another. Otherwise run this interactively in your own terminal:
 
 ```sh
-gpg --default-new-key-algo rsa4096 --gen-key
+gpg --default-new-key-algo 'rsa4096/cert,sign+rsa4096/encr' --gen-key
 gpg --list-secret-keys --keyid-format long --with-fingerprint
 ```
-
 Enter your chosen public identity, choose a strong passphrase and retain the private key/revocation certificate privately. Find the **full primary fingerprint**, not just a short key ID. Substitute it for `YOUR_FULL_FINGERPRINT` below:
 
 ```sh
@@ -43,6 +42,8 @@ gpg --decrypt launchpad-confirmation.asc
 ```
 
 Follow the link in the decrypted message to confirm ownership. Do not share that confirmation link/message publicly. Keyserver propagation can take time. Confirm the key appears on your Launchpad profile. Read and sign the [Ubuntu Code of Conduct](https://launchpad.net/codeofconduct) as requested by Launchpad's setup flow.
+
+The new-key command includes an encryption subkey so Launchpad can send the encrypted confirmation email. **Keys pending validation** means registration is unfinished: open the decrypted link in your browser and confirm the import. The checkbox and **Cancel Validation** button cancel the request; they do not confirm it.
 
 Your upload key authenticates source submissions. Launchpad manages the separate archive signing key used by APT; it can appear only after the first accepted upload. Do not confuse the two fingerprints.
 
@@ -101,6 +102,31 @@ This command publishes the signed files listed in `.changes`. Read the acceptanc
 
 If FTP upload fails, Launchpad also documents SFTP. Register a public SSH key with Launchpad and configure the corresponding `dput` target only if using that method; do not disable signature checks or blindly accept an unverified SSH host key. See the official upload guide below.
 
+### Prepare the same beta for Ubuntu 26.04
+
+Ubuntu 26.04 uses the `resolute` suite. A `noble` upload does not supply its package index. Rebuild the reviewed source for each intended suite, keeping the original upstream archive byte-for-byte unchanged. The source preparation helper above currently targets `noble`; the following workflow reuses that existing source package. Verify its signature first with the intended registered uploader key.
+
+From the repository root, using the files generated in section 5:
+
+```sh
+(
+set -e
+gpg --verify dist/ppa-beta1/kavrune_0.1.0-0ubuntu1~beta1~noble1.dsc
+mkdir -m 700 dist/ppa-beta1-resolute
+cp dist/ppa-beta1/kavrune_0.1.0.orig.tar.xz dist/ppa-beta1-resolute/
+dpkg-source -x dist/ppa-beta1/kavrune_0.1.0-0ubuntu1~beta1~noble1.dsc dist/ppa-beta1-resolute/kavrune-0.1.0
+cd dist/ppa-beta1-resolute/kavrune-0.1.0
+dch --maintmaint --newversion 0.1.0-0ubuntu1~beta1~resolute1 --distribution resolute 'Rebuild the reviewed beta for Ubuntu 26.04; preserve the original upstream archive.'
+debuild -S -sa -d -kYOUR_FULL_FINGERPRINT
+cd ..
+gpg --verify kavrune_0.1.0-0ubuntu1~beta1~resolute1.dsc
+gpg --verify kavrune_0.1.0-0ubuntu1~beta1~resolute1_source.changes
+dput ppa:arunvpp/kavrune-beta kavrune_0.1.0-0ubuntu1~beta1~resolute1_source.changes
+)
+```
+
+Stop on any failed command. Keep the approved public maintainer details; `--maintmaint` preserves them. Compare the copied `.orig.tar.xz` hash with the original preparation report before upload. A new suite has its own package version, build result, publication and installation acceptance. Do not announce Ubuntu 26.04 availability until its own build and publication succeed. A completed local preparation is not a published package.
+
 ## 7. Test installation, then give users the commands
 
 In a disposable Ubuntu 24.04 amd64 VM, confirm installation, application menu launch, `kavrune --version`, and the safe temporary-file self-test. Test reinstall/upgrade/remove and retained user files separately. Do not erase a physical drive as an automated publication check. Extraction/CI checks alone do not exercise APT installation.
@@ -128,6 +154,27 @@ sudo apt update
 ```
 
 Removing the PPA alone does not remove an installed app. Removing the app retains user images, backups and diagnostics; see [Privacy](../PRIVACY.md).
+
+## PPA installation troubleshooting
+
+| Symptom | Meaning and next action |
+|---|---|
+| `GPGKeyTemporarilyNotFoundError` from `getSigningKeyData()` | Launchpad could not supply the PPA's archive-signing key. This is separate from your registered source-upload key. Initial archive-key generation and keyserver propagation can take time, sometimes a couple of hours. Wait for Launchpad's key lookup to work, then retry adding the repository; keep APT signature verification enabled. |
+| `Suites: resolute` on a computer using Ubuntu 26.04 | `add-apt-repository` selects the local Ubuntu suite. The archive needs a successful published `resolute` build; a `noble` source upload alone is insufficient. Check the package page for that suite rather than replacing system sources with a different release. |
+| `Unable to locate package kavrune` | The PPA may not have been added, the local package index may be stale, or no compatible binary is published. Require a working archive key and a published package for the local suite, then run `sudo apt update` and inspect `apt-cache policy kavrune`. |
+| HTTP `403 Forbidden` downloading this PPA's `InRelease`, followed by “repository is not signed” | The server denied access to the signed package index. The follow-up authentication warning does not establish that a downloaded signature was invalid. Check publication and access first. If this PPA is not usable, disable only this source with the commands below to restore normal APT updates. A working archive-key lookup alone does not establish publication. |
+| Source accepted, build running or `Uploading build` | Launchpad has accepted the submission but has not yet confirmed a published installable binary. Watch the existing build; repeated uploads do not advance it. |
+
+If adding this PPA has made normal updates fail, disable its source while publication is being resolved:
+
+```sh
+sudo add-apt-repository --remove --no-update ppa:arunvpp/kavrune-beta &&
+sudo apt update
+```
+
+Re-enable it only after the intended suite has a successfully built, published binary and its signed index is accessible. Removing a source does not uninstall an existing app. Preserve signature checking; do not replace another repository's files or switch Ubuntu suites to hide the failure.
+
+Read the [official archive-key explanation](https://ubuntu.com/docs/launchpad/user/reference/packaging/ppas/ppa/) and [upload troubleshooting](https://ubuntu.com/docs/launchpad/user/explanation/packaging/package-upload-errors/). Do not use `trusted=yes`, `--allow-unauthenticated` or another Ubuntu suite as a workaround.
 
 ## Evidence and limits
 
