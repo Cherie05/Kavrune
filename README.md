@@ -159,3 +159,20 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting a change and follow th
 See the [changelog](CHANGELOG.md) for preview scope and the [GitHub publishing guide](docs/PUBLISHING.md) for repository setup and release steps. Follow [SECURITY.md](SECURITY.md) for the available vulnerability reporting process.
 
 The [repository review](docs/REPOSITORY_REVIEW.md) records current notices, instructions, GitHub settings and remaining acceptance work. The [production audit](docs/PRODUCTION_AUDIT.md) records the earlier review. The [complete desktop standards assessment](docs/STANDARDS_ASSESSMENT.md) maps all 25 supplied principles and 24 release criteria to current implementation, evidence, remaining work and inapplicable features. Permanent [product standards](PRODUCT_STANDARDS.md), [requirements](PRODUCT_REQUIREMENTS.md), [architecture](ARCHITECTURE.md), [privacy/legal inventory](PRIVACY_AND_LEGAL.md), [test plan](TEST_PLAN.md) and [release checklist](RELEASE_CHECKLIST.md) ship with the package. Passing local tests and adding notices do not complete production qualification.
+
+
+
+
+## Support Continued Development
+
+This project is part of my independent open-source work.
+
+I build and share software because I believe useful technology should be accessible to people who want to learn, experiment, solve problems, and build upon existing ideas.
+
+Maintaining open-source projects requires continued development, testing, documentation, and improvements.
+
+If this project has helped you learn something, solve a problem, or develop your own work, you can support its continued development through GitHub Sponsors.
+
+Sponsorship is entirely voluntary. The software remains freely available regardless of whether you choose to contribute.
+
+**[Support my open-source work on GitHub Sponsors](https://github.com/sponsors/Cherie05)**
